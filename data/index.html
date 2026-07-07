@@ -1,0 +1,2091 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Monitoraggio Camper</title>
+
+  <script src="/chart.min.js"></script>
+
+  <style>
+    :root{
+      --font-base:22px;
+      --font-big:32px;
+      --font-title:42px;
+      --font-gauge:50px;
+      --accent:#00e676;
+    }
+
+    body{
+      margin:0;
+      background:#121212;
+      color:#e6e6e6;
+      font-family:Arial, sans-serif;
+      font-size:var(--font-base);
+    }
+
+    .app-bar{
+      background:#1f1f1f;
+      color:var(--accent);
+      padding:12px 16px;
+      border-bottom:2px solid #333;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+
+    .app-title{
+      font-size:var(--font-title);
+      margin:auto;
+      text-align:center;
+      flex:1;
+    }
+
+    .app-clock{
+      font-size:var(--font-big);
+      font-variant-numeric:tabular-nums;
+      white-space:nowrap;
+    }
+
+    .tabs{
+      display:flex;
+      background:#1f1f1f;
+      border-bottom:1px solid #333;
+    }
+
+    .tab{
+      flex:1;
+      text-align:center;
+      padding:16px 0;
+      cursor:pointer;
+      font-size:var(--font-big);
+      color:#aaa;
+    }
+
+    .tab.active{
+      color:var(--accent);
+      border-bottom:3px solid var(--accent);
+    }
+
+    .page{display:none;padding:16px;}
+    .page.active{display:block;}
+
+    .card{
+      background:#1e1e1e;
+      padding:20px;
+      margin:20px auto;
+      border-radius:12px;
+      max-width:900px;
+    }
+
+    .card h2{
+      margin:0 0 10px;
+      font-size:var(--font-title);
+      color:var(--accent);
+    }
+
+    .card div{
+      margin:10px 0;
+      font-size:var(--font-big);
+      font-weight:bold;
+    }
+
+    button{
+      width:100%;
+      max-width:500px;
+      margin:20px auto;
+      display:block;
+      background:var(--accent);
+      border:none;
+      border-radius:10px;
+      padding:16px;
+      font-size:var(--font-big);
+      color:#000;
+      cursor:pointer;
+    }
+
+    .chart-buttons {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .chart-buttons button {
+      width: auto;
+      max-width: none;
+      margin: 0;
+      padding: 14px 20px;
+      font-size: var(--font-big);
+    }
+
+    .chart-buttons button.active {
+        background: #00e676 !important;      
+        color: #000 !important;
+        border: 2px solid #444 !important;   
+        box-shadow: 0 0 6px #00e676;         
+        font-weight: bold;
+        opacity: 1 !important;
+    }
+
+
+    .chart-wrap{
+      width:100%;
+      max-width:900px;
+      height:330px;
+      margin:20px auto;
+      background:#212121;
+      border:1px solid #333;
+      border-radius:12px;
+      overflow:hidden;
+    }
+
+    .chart-wrap canvas{
+      width:100% !important;
+      height:100% !important;
+      display:block;
+    }
+
+    canvas.gauge{
+      width:100%;
+      max-width:900px;
+      background:#212121;
+      border:1px solid #333;
+      border-radius:12px;
+      display:block;
+      margin:20px auto;
+    }
+  
+
+    .gauge-label{
+      font-size: var(--font-gauge);
+    }
+
+
+
+    /* Pulsanti affiancati (stesso stile dei button esistenti) */
+    .btn-row{
+      display:flex;
+      gap:12px;
+      justify-content:center;
+      align-items:center;
+      flex-wrap:wrap;
+      margin: 20px auto;
+      max-width: 900px;
+    }
+    .btn-row button{
+      flex:1 1 300px;   /* diventano due colonne su desktop, vanno a capo su mobile */
+      max-width: 440px;
+    }
+
+/* ======================= GAS ====================== */
+
+.gas-container {
+  display: flex;
+  justify-content: center;
+  gap: 40px;
+  padding: 40px 20px 20px 20px; /* ↑ Aumentato margine sopra */
+  flex-wrap: wrap;
+  margin-top: 30px;  /* Spazio extra dal bordo superiore */
+}
+
+
+/* Bombole grandi e responsive */
+.gas-bottle {
+  width: 45vw;              /* metà schermo circa */
+  max-width: 300px;         /* limite su schermi grandi */
+  display: flex;
+  flex-direction: column;
+  align-items: center;      /* centra tutti i figli (bottle, label, % e bottone) */
+  text-align: center;
+}
+
+.bottle {
+  width: 60%;               /* proporzionale al contenitore */
+  max-width: 180px;
+  aspect-ratio: 1 / 2.6;    /* forma bombola dinamica */
+  border: 4px solid #888;
+  border-radius: 40px;
+  margin: 0 auto;
+  position: relative;
+  background: #1a1a1a;
+  overflow: hidden;
+}
+
+
+/* Mantieni le etichette e il bottone larghe quanto la bombola */
+.gas-bottle .gas-kg,
+.gas-bottle .gas-pct,
+.gas-bottle button {
+  width: 60%;
+  max-width: 180px;     /* come la .bottle */
+  margin-left: auto;    /* centra orizzontalmente */
+  margin-right: auto;   /* centra orizzontalmente */
+}
+
+
+/* Tappo responsive */
+.cap {
+  width: 40%;
+  height: 14px;
+  background: #888;
+  border-radius: 6px 6px 0 0;
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* Fill responsive */
+.fill {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 0%;
+  background: #ff9d00;
+  transition: height 0.4s ease;
+}
+
+.gas-kg {
+  margin-top: 20px;
+  font-size: 40px;
+  color: #ff9d00;
+  font-weight: bold;
+}
+
+.gas-pct {
+  font-size: 32px;
+  color: #ccc;
+  margin-top: 18px;  
+  margin-bottom: 14px;
+}
+
+/* ======================= ACQUA – Serbatoio verticale ====================== */
+
+.water-graph{
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 8px 0;
+}
+
+.tank{
+  width: 45vw;
+  max-width: 320px;
+  aspect-ratio: 1 / 2;
+  border: 4px solid #2196f3;
+  border-radius: 18px;
+  background: #1a1a1a;
+  position: relative;
+  overflow: hidden;
+}
+
+.tank-fill{
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 0%;                /* aggiornato via JS */
+  background: #2196f3;
+  transition: height 0.4s ease;
+}
+
+.water-percent{
+  text-align: center;
+  font-size: 80px;     
+  font-weight: bold;   
+  color: #ccc;
+  margin-top: 12px;    /* leggero distacco dal serbatoio */
+}
+
+/* ======================= LIVELLO CAMPER ====================== */
+#page_livello .card div {
+  font-size: var(--font-big);
+}
+#levelCanvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+  </style>
+</head>
+
+<body>
+
+  <!-- APP BAR -->
+  <div class="app-bar">
+    <div class="app-title">Monitoraggio Camper</div>
+    <div class="app-clock" id="titleClock">--:--</div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs">
+    <div class="tab active" onclick="showPage('batteria')">Batteria</div>
+    <div class="tab" onclick="showPage('solare')">Solare</div>
+    <div class="tab" onclick="showPage('acqua')">Acqua</div>
+    <div class="tab" onclick="showPage('gas')">Gas</div>
+    <div class="tab" onclick="showPage('temperatura')">Temperatura</div>
+    <div class="tab" onclick="showPage('livello')">Livello</div>
+  </div>
+
+  <!-- PAGINA BATTERIA -->
+  <div id="page_batteria" class="page active">
+    <div class="card">
+      <h2>Batteria</h2>
+      <div>Tensione: <span id="currentVoltage">--</span></div>
+      <div>Corrente: <span id="currentAmps">--</span> A</div>
+      <div>Ah disponibili: <span id="ahNow">--</span> / <span id="ahMax">--</span></div>
+      <div>Stato carica: <span id="socPct">--</span>%</div>
+      <div>Efficienza: <span id="eff">--</span></div>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="voltageChart"></canvas>
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="currentChart"></canvas>
+    </div>
+
+    <div class="chart-buttons">
+      <button onclick="setRange(1)">Ultima ora</button>
+      <button onclick="setRange(6)">Ultime 6 ore</button>
+      <button onclick="setRange(24)">Ultime 24 ore</button>
+    </div>
+
+    <canvas id="ahGauge" class="gauge" width="600" height="300"></canvas>
+
+    <div class="btn-row">
+      <button id="resetAhBtn" type="button">Imposta Ah batterie</button>
+      <button id="setEffBtn"  type="button">Imposta efficienza</button>
+    </div>
+
+    <div class="chart-wrap" style="height:300px">
+      <canvas id="ahHourlyChart"></canvas>
+    </div>
+
+    <div class="chart-buttons">
+      <button data-ahday="today" class="active" onclick="showAhDay('today')">Oggi</button>
+      <button data-ahday="yesterday" onclick="showAhDay('yesterday')">Ieri</button>
+    </div>
+    
+    <div id="ahConsumedTotal" style="text-align:center;font-size:28px;margin-top:10px;color:#00e676;">
+      Totale oggi: --
+    </div>
+    
+  <!-- RICARICA AH -->
+    <div class="chart-wrap" style="height:300px">
+      <canvas id="ahChargeHourlyChart"></canvas>
+    </div>
+
+    <div class="chart-buttons">
+      <button data-ahchargeday="today" class="active" onclick="showAhChargeDay('today')">Oggi</button>
+      <button data-ahchargeday="yesterday" onclick="showAhChargeDay('yesterday')">Ieri</button>
+    </div>
+
+    <div id="ahChargeTotal" style="text-align:center;font-size:28px;margin-top:10px;color:#2196f3;">
+      Totale oggi: --
+    </div>
+
+    
+  </div>
+
+
+  <!-- PAGINA SOLARE -->
+    <div id="page_solare" class="page">
+        <div class="card">
+            <h2>Solare</h2>
+            <div>Corrente pannelli: <span id="solAmp">--</span> A</div>
+            <div>Potenza: <span id="solWatt">--</span> W</div>
+            <div>Tensione batteria: <span id="solVolt">--</span> V</div>
+            <div>Ah prodotti oggi: <span id="solAhToday">--</span> Ah</div>
+        </div>
+
+
+        <h2 style="text-align:center;margin-top:30px">Corrente Solare</h2>
+
+        <div class="chart-wrap">
+            <canvas id="solarCurrentChart"></canvas>
+        </div>
+
+        <div class="chart-buttons" id="solarRangeButtons">
+            <button onclick="setSolarRange(1)">Ultima ora</button>
+            <button onclick="setSolarRange(6)">Ultime 6 ore</button>
+            <button onclick="setSolarRange(24)">Ultime 24 ore</button>
+        </div>
+
+
+
+        <h2 style="text-align:center;margin-top:60px">Produzione Ah oraria</h2>
+        
+
+        <div class="chart-wrap" style="height:300px">
+            <canvas id="solarAhBar"></canvas>
+        </div>
+
+        <div class="chart-buttons">
+            <button data-solah="today" class="active" onclick="showSolarAh('today')">Oggi</button>
+            <button data-solah="yesterday" onclick="showSolarAh('yesterday')">Ieri</button>
+        </div>
+
+        <div id="solarAhTotal" style="text-align:center;font-size:28px;margin-top:10px;color:#ffd54f;">
+            Totale oggi: --
+        </div>
+
+    </div>    
+
+
+
+  <!-- PAGINA ACQUA -->
+  <div id="page_acqua" class="page">
+    <div class="card">
+      <h2>Serbatoio Acqua</h2>
+      <div>Litri consumati: <span id="litriConsumati">--</span></div>
+      <div>Litri rimanenti: <span id="litriRimanenti">--</span></div>
+      <div>Flusso attuale: <span id="waterFlow">--</span> L/min</div>
+    </div>
+
+
+<div class="water-graph">
+  <div class="tank">
+    <div class="tank-fill" id="waterFill"></div>
+  </div>
+</div>
+
+<div class="water-percent" id="waterPercentLabel">--%</div>
+
+<button id="resetTankBtn">Riempimento serbatoio</button>
+  </div>
+
+<!-- PAGINA GAS -->
+<div id="page_gas" class="page">
+
+  <div class="gas-container">
+
+    <!-- Bombola 1 -->
+    <div class="gas-bottle">
+      <div class="bottle">
+        <div class="cap"></div>
+        <div class="fill" id="gasFill1"></div>
+      </div>
+      <div class="gas-kg" id="gasKg1Label">-- kg</div>
+      <div class="gas-pct" id="gasPct1Label">--%</div>
+      <button id="resetGasBtn1">Cambio bombola 1</button>
+    </div>
+
+    <!-- Bombola 2 -->
+    <div class="gas-bottle">
+      <div class="bottle">
+        <div class="cap"></div>
+        <div class="fill" id="gasFill2"></div>
+      </div>
+      <div class="gas-kg" id="gasKg2Label">-- kg</div>
+      <div class="gas-pct" id="gasPct2Label">--%</div>
+      <button id="resetGasBtn2">Cambio bombola 2</button>
+    </div>
+
+  </div>
+
+</div>
+
+
+
+<!-- PAGINA LIVELLO -->
+<div id="page_livello" class="page">
+
+  <style>
+    /* ==========================
+       LIVELLO CAMPER – MAXI CLEAN
+       ========================== */
+
+    .camper-top {
+      width: 520px;          /* aumentato */
+      height: 720px;         /* spazio angoli */
+      background: #2a2a2a;
+      border-radius: 26px;
+      margin: 20px auto;
+      position: relative;
+      box-shadow: 0 0 20px #000 inset;
+    }
+
+    /* Corpo neutro */
+    .camper-body {
+      position: absolute;
+      top: 90px;
+      left: 90px;
+      width: 340px;
+      height: 540px;
+      background: #1c1c1c;
+      border-radius: 24px;
+      border: 4px solid #888;
+      box-shadow: inset 0 0 18px #000;
+    }
+
+    /* ANGOLI EXTRA LARGE */
+    .corner {
+      position: absolute;
+      width: 160px;   /* ancora più grandi */
+      height: 160px;
+      border-radius: 18px;
+      background: #333;
+      border: 4px solid #777;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 34px;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 10px #000;
+      transition:
+        background 0.25s ease,
+        border-color 0.25s ease,
+        transform 0.25s ease;
+      overflow: hidden; /* evita che "cm" scenda a capo */
+      white-space: nowrap; /* BLOCCA il capo linea */
+    }
+
+    #cornerFL { top: 20px; left: 20px; }
+    #cornerFR { top: 20px; right: 20px; }
+    #cornerRL { bottom: 20px; left: 20px; }
+    #cornerRR { bottom: 20px; right: 20px; }
+
+    .corner-value {
+      font-size: 30px;
+      font-weight: bold;
+      letter-spacing: -1px; 
+    }
+
+    /* Pitch/Roll */
+    #page_livello .card div {
+      font-size: 38px;
+    }
+  </style>
+
+  <div class="card">
+    <h2>Livello Camper</h2>
+    <div>Beccheggio (pitch): <span id="pitchVal">--</span> °</div>
+    <div>Rollio (roll): <span id="rollVal">--</span> °</div>
+  </div>
+
+  <!-- LIVELLA TONDA -->
+  <div class="chart-wrap" style="height:380px">
+    <canvas id="levelCanvas"></canvas>
+  </div>
+
+  <!-- CAMPER SEMPLICE & PULITO -->
+  <div class="camper-top">
+
+    <div class="camper-body"></div>
+
+    <div class="corner" id="cornerFL">
+      <span class="corner-value" id="valFL">-- cm</span>
+    </div>
+
+    <div class="corner" id="cornerFR">
+      <span class="corner-value" id="valFR">-- cm</span>
+    </div>
+
+    <div class="corner" id="cornerRL">
+      <span class="corner-value" id="valRL">-- cm</span>
+    </div>
+
+    <div class="corner" id="cornerRR">
+      <span class="corner-value" id="valRR">-- cm</span>
+    </div>
+
+  </div>
+
+  <div class="btn-row">
+    <button id="levelCalBtn" type="button">Calibra a zero (azzera ora)</button>
+  </div>
+
+</div>
+
+
+<!-- PAGINA TEMPERATURA -->
+<div id="page_temperatura" class="page">
+
+  <div class="card">
+    <h2>Ambiente Interno</h2>
+    <div>Temperatura: <span id="tempIntVal">--</span> °C</div>
+    <div>Umidità: <span id="humIntVal">--</span> %</div>
+  </div>
+
+  <div class="card">
+    <h2>Ambiente Esterno</h2>
+    <div>Temperatura: <span id="tempExtVal">--</span> °C</div>
+    <div>Umidità: <span id="humExtVal">--</span> %</div>
+  </div>
+
+</div>
+
+
+<script>
+
+/* ===================== COSTANTI ===================== */
+
+const LOW_THRESHOLD = 0.2;
+const ANIM_MS = 400;
+
+const WATER_COLOR = "#2196f3";
+const LOW_COLOR   = "#ff3b30";
+
+const HOURS_LABELS = Array.from({ length: 24 }, (_, i) =>
+  String(i).padStart(2, "0") + ":00"
+);
+
+function to01(v){
+  if (v == null || isNaN(v)) return 0;
+  if (v > 1.0001) return Math.max(0, Math.min(1, v / 100)); // 0–100 → 0–1
+  return Math.max(0, Math.min(1, v));                        // già normalizzato
+}
+
+
+/* ===================== STATO ===================== */
+
+let waterPct = 0;
+let currentPage = "batteria";
+
+let gasPct1 = 0;
+let gasPct2 = 0;
+
+let gasKg1 = 0;
+let gasKg2 = 0;
+
+let ahToday = Array(24).fill(null);
+let ahYesterday = Array(24).fill(null);
+let currentAhDay = "today";
+
+let ahChargeToday = Array(24).fill(null);
+let ahChargeYesterday = Array(24).fill(null);
+let currentAhChargeDay = "today";
+
+let ahPct = 0;
+let ahPctDrawn = 0;
+let levelFastTimer = null;
+
+/* ===================== TABS ===================== */
+
+function showPage(name){
+  currentPage = name;
+
+  document.querySelectorAll(".page").forEach(p => p.classList.remove("active"));
+  document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+
+  document.getElementById("page_" + name).classList.add("active");
+
+  if (name === "batteria") {
+      requestAnimationFrame(() => drawAhGauge(ahPct));
+  }
+
+
+
+document.querySelectorAll(".tab")
+  .forEach(t => t.classList.remove("active"));
+
+const tab = [...document.querySelectorAll(".tab")]
+  .find(t => t.textContent.trim().toLowerCase() === name);
+
+if (tab) tab.classList.add("active");
+
+
+if (name === "livello") {
+    fetch("/levelSpeed?mode=fast").catch(()=>{});
+    startFastLevelPolling();    
+    levelFastLoop();            
+} else {
+    fetch("/levelSpeed?mode=slow").catch(()=>{});
+    stopFastLevelPolling();
+}
+
+
+if (name === "solare") {
+  if (window.lastData) {
+    
+  const savedSolarDay = localStorage.getItem("solarAhDay") || "today";
+  showSolarAh(savedSolarDay); 
+
+    updateSolarCurrentRange();
+
+    if (solarCurrentChart) {
+      requestAnimationFrame(() => {
+        solarCurrentChart.resize();
+        solarCurrentChart.update();
+      });
+
+    }
+
+    if (Array.isArray(window.lastData.solAhHourlyToday)) {
+      updateSolarAhBars(window.lastData.solAhHourlyToday);
+    }
+  }
+}
+
+
+// imposta lo stato visivo dei pulsanti Oggi/Ieri (Solare)
+document.querySelectorAll("[data-solah]").forEach(b =>
+  b.classList.toggle("active", b.getAttribute("data-solah") === "today")
+);
+
+// aggiorna subito il totale "oggi"
+const tot = window.lastData?.solarAhTodayTotal;
+if (typeof tot === 'number') {
+  document.getElementById("solarAhTotal").textContent = `Totale oggi: ${tot.toFixed(2)} Ah`;
+}
+
+
+// fetch immediato dei dati della pagina selezionata
+fetchPageData();
+
+}
+
+/* ===================== OROLOGIO ===================== */
+
+
+const itNumber  = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 2 });
+const itNumber1 = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 1 });
+const itInteger = new Intl.NumberFormat('it-IT', { maximumFractionDigits: 0 });
+const itNumber2 = new Intl.NumberFormat('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+
+const timeFormat = new Intl.DateTimeFormat('it-IT', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+function updateTitleClock(){
+  const n = new Date();
+  document.getElementById("titleClock").textContent = timeFormat.format(n);
+}
+
+
+/* ===================== GRAFICO BATTERIA ===================== */
+
+let fullLabels = [];
+let fullValues = [];
+let currentFullValues = []; 
+let selectedHours = 1;
+let fullEpoch = [];
+let solarSelectedHours = 1;
+let solarFullLabels = [];
+let solarFullValues = [];
+let solarFullEpoch = [];
+
+const chart = new Chart(
+  document.getElementById("voltageChart").getContext("2d"),
+  {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        label: "Tensione (V)",
+        data: [],
+        borderColor: "#00e676",
+        backgroundColor: "rgba(0,230,118,0.2)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+        y: { ticks: { color: "#ccc" }, grid: { color: "#333" } }
+      }
+    }
+  }
+);
+
+
+/* ================= Grafico Corrente (A) =========================== */
+
+const currentChart = new Chart(
+  document.getElementById("currentChart").getContext("2d"),
+  {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        label: "Corrente (A)",
+        data: [],
+        borderColor: "#ff9800",
+        backgroundColor: "rgba(255,152,0,0.2)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+        y: { 
+          ticks: { color: "#ccc" }, 
+          grid: { color: "#333" },
+          beginAtZero: false  
+        }
+      }
+    }
+  }
+);
+
+
+
+/* ================= Grafico Corrente Solare (A) =========================== */
+
+// Crea SUBITO il grafico (come fai per la batteria), senza condizionali.
+let solarCurrentChart = new Chart(
+  document.getElementById("solarCurrentChart").getContext("2d"),
+  {
+    type: "line",
+    data: {
+      labels: [],
+      datasets: [{
+        label: "Corrente Solare (A)",
+        data: [],
+        borderColor: "orange",
+        backgroundColor: "rgba(255,165,0,0.2)",
+        fill: true,
+        tension: 0.3,
+        pointRadius: 0
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color:"#ccc" }, grid:{ color:"#333" } },
+        y: { 
+          ticks: { color:"#ccc" }, 
+          grid:{ color:"#333" },
+          // opzionale ma utile per vedere sempre la scala anche a dati scarsi
+          // suggestedMin: 0, suggestedMax: 10 
+        }
+      }
+    }
+  }
+);
+
+// Aggiorna SOLO i dati (non ricreare il chart)
+function updateSolarCurrent(labels, values) {
+  const vals = Array.isArray(values) ? values : [];
+  const safeLabels = (Array.isArray(labels) && labels.length === vals.length)
+    ? labels
+    : Array.from({length: vals.length}, () => '');
+
+  solarCurrentChart.data.labels = safeLabels;
+  solarCurrentChart.data.datasets[0].data = vals;
+  solarCurrentChart.update();
+}
+
+function updateSolarCurrentRange() {
+  try {
+    if (!Array.isArray(solarFullEpoch) || !Array.isArray(solarFullValues)) {
+      updateSolarCurrent([], []);
+      return;
+    }
+
+    const total = Math.min(solarFullEpoch.length, solarFullValues.length);
+    if (total === 0) {
+      updateSolarCurrent([], []);
+      return;
+    }
+
+    const nowMin = Math.floor(Date.now() / 60000);
+    const cutoff =
+      solarSelectedHours === 1 ? nowMin - 60 :
+      solarSelectedHours === 6 ? nowMin - 360 :
+      nowMin - 1440;
+
+    const idx = [];
+    for (let i = 0; i < total; i++) {
+      if (solarFullEpoch[i] >= cutoff) idx.push(i);
+    }
+
+    if (idx.length === 0) {
+      updateSolarCurrent([], []);
+      return;
+    }
+
+    const labels = idx.map(i => solarFullLabels[i]);
+
+    const values = idx.map(i => solarFullValues[i]);
+
+    updateSolarCurrent(labels, values);
+  } catch (e) {
+    console.error("updateSolarCurrentRange error:", e);
+  }
+}
+
+
+
+/* ---------- GAUGE AH CON LANCETTA (Ah → % input 0–1) ---------- */
+
+function drawAhGauge(pct) {
+  // Qui pct arriva 0–100 → converti a 0–1
+  const pctTarget = Math.max(0, Math.min(1, (pct ?? 0) / 100));
+  animateAhGauge(pctTarget);
+}
+
+function animateAhGauge(pctTarget) {
+  const start = ahPctDrawn ?? 0;
+  const startTime = performance.now();
+
+  function frame(t) {
+    const progress = Math.min((t - startTime) / ANIM_MS, 1);
+    const p = start + (pctTarget - start) * progress;
+    drawAhGaugeFrame(p);
+
+    if (progress < 1) requestAnimationFrame(frame);
+    else ahPctDrawn = pctTarget;
+  }
+  requestAnimationFrame(frame);
+}
+
+function drawAhGaugeFrame(pct) {
+  const c = document.getElementById("ahGauge");
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  if (!ctx) return;
+
+  const w = c.offsetWidth || 300;
+  const h = Math.round(w / 2);
+  c.width = w;
+  c.height = h;
+
+  const cx = w / 2, cy = h, r = w / 2 - 20;
+  ctx.clearRect(0, 0, w, h);
+
+  const angle = Math.PI + pct * Math.PI;
+  const isLow = pct < LOW_THRESHOLD;
+  const color = isLow ? LOW_COLOR : "#00e676";
+
+  // arco sfondo
+  ctx.lineWidth = 30;
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#444";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, Math.PI, 0);
+  ctx.stroke();
+
+  // arco attivo
+  if (pct > 0) {
+    ctx.strokeStyle = color;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, angle);
+    ctx.stroke();
+  }
+
+  // lancetta
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + r * 0.9 * Math.cos(angle), cy + r * 0.9 * Math.sin(angle));
+  ctx.stroke();
+
+  // centro
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(cx, cy, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  // icona batteria
+  ctx.font = "40px Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = "#e6e6e6";
+  ctx.fillText("🔋", cx, cy - r * 0.65);
+
+  // percentuale
+  ctx.font = "bold 50px Arial";
+  ctx.fillText(`${Math.round(pct * 100)}%`, cx, cy - r * 0.3);
+}
+
+
+/* ===================== FETCH DATI ===================== */
+
+
+let fetchTimer = null;
+let fetchIntervalMs = 1000;    // base
+let backoff = 0;               // step di backoff
+let lastPayloadHash = null;
+
+function hashObject(obj){
+  try {
+    return JSON.stringify(obj);
+  } catch { return null; }
+}
+
+async function fetchPageData() {
+    if (document.hidden) return;
+
+    try {
+        let resp;
+
+        switch (currentPage) {
+
+            case "batteria": {
+            const n =
+              selectedHours === 1 ? 60 :
+              selectedHours === 6 ? 360 :
+              1440;
+
+            resp = await fetch(`/data/battery?n=${n}`);
+            window.lastData = await resp.json();
+            updateBatteryPage(window.lastData);
+            break;
+            }
+
+            case "solare": {
+            const n =
+              solarSelectedHours === 1 ? 60 :
+              solarSelectedHours === 6 ? 360 :
+              1440;
+
+            resp = await fetch(`/data/solar?n=${n}`);
+            window.lastData = await resp.json();
+            updateSolarPage(window.lastData);
+            break;
+            }
+
+            case "acqua":
+                resp = await fetch("/data/water");
+                window.lastData = await resp.json();
+                updateWaterPage(window.lastData);
+                break;
+
+            case "gas":
+                resp = await fetch("/data/gas");
+                window.lastData = await resp.json();
+                updateGasPage(window.lastData);
+                break;
+
+            
+            case "temperatura":
+                resp = await fetch("/data/live");
+                window.lastData = await resp.json();
+                updateLivePage(window.lastData);
+                break;
+
+            case "livello":
+                // usa già /level in polling rapido → NON toccare
+                break;
+
+            default:
+                // Home → usa i valori live
+                resp = await fetch("/data/live");
+                window.lastData = await resp.json();
+                updateLivePage(window.lastData);
+        }
+
+    } catch (e) {
+        console.warn("fetchPageData error:", e);
+    }
+
+    scheduleNextFetch();
+}
+
+function updateLivePage(d){
+    document.getElementById("currentVoltage").textContent = d.vBattery.toFixed(2);
+    document.getElementById("currentAmps").textContent = d.amps.toFixed(2);
+    document.getElementById("socPct").textContent = d.socPct.toFixed(0);
+    document.getElementById("tempIntVal").textContent = d.tempInt.toFixed(1);
+    document.getElementById("tempExtVal").textContent = d.tempExt.toFixed(1);
+    document.getElementById("humIntVal").textContent = d.humInt.toFixed(0);
+    document.getElementById("humExtVal").textContent = d.humExt.toFixed(0);
+}
+
+
+function updateBatteryPage(d){
+
+    fullLabels = Array.isArray(d.labels) ? d.labels : [];
+    fullValues = Array.isArray(d.volt) ? d.volt : [];
+    currentFullValues = Array.isArray(d.amps) ? d.amps : [];
+    fullEpoch = Array.isArray(d.epoch) ? d.epoch : [];
+
+    updateChart();
+    updateCurrentChart();
+
+    document.getElementById("currentVoltage").textContent = d.vBattery.toFixed(2);
+    document.getElementById("currentAmps").textContent = d.ampNow.toFixed(2);
+    document.getElementById("ahNow").textContent = d.ahNow?.toFixed(1) ?? "--";
+    document.getElementById("ahMax").textContent = d.ahMax?.toFixed(0) ?? "--";
+    document.getElementById("socPct").textContent = d.socPct.toFixed(0);
+
+    // Efficienza (0.5..1.0 -> %)
+    document.getElementById("eff").textContent =
+       (typeof d.eff === 'number') ? Math.round(d.eff * 100) + "%" : "--";
+
+    // Serie orarie per gli istogrammi (oggi/ieri)
+    ahToday           = normalizeHourlyArray(d.ahHourlyToday);
+    ahYesterday       = normalizeHourlyArray(d.ahHourlyYesterday);
+    ahChargeToday     = normalizeHourlyArray(d.ahChargeHourlyToday);
+    ahChargeYesterday = normalizeHourlyArray(d.ahChargeHourlyYesterday);
+
+    // (Ri)disegna i due istogrammi con il giorno selezionato
+    ensureAhHourlyChart();
+    ensureAhChargeHourlyChart();
+    showAhDay(localStorage.getItem("ahDay") || "today");
+    showAhChargeDay(localStorage.getItem("ahChargeDay") || "today");
+
+    ahPct = d.socPct;
+    drawAhGauge(ahPct);
+}
+
+
+function updateSolarPage(d){
+  solarFullLabels = Array.isArray(d.labels) ? d.labels : [];   // legacy
+  solarFullValues = Array.isArray(d.solarA) ? d.solarA : [];
+  solarFullEpoch  = Array.isArray(d.epoch) ? d.epoch : [];
+  // aggiorna grafico solare con i dati completi (poi il range li "taglia")
+  updateSolarCurrent(solarFullLabels, solarFullValues);
+
+  // metriche live
+  document.getElementById("solAmp").textContent  = d.solarNow.toFixed(2);
+  document.getElementById("solWatt").textContent = d.solarW.toFixed(0);
+  document.getElementById("solVolt").textContent = d.vBattery.toFixed(2);
+
+  // Ah prodotti oggi (alias compatibili)
+  const solAhTodayVal = (
+    (typeof d.solarAhTodayTotal === 'number' && d.solarAhTodayTotal) ||
+    (typeof d.solAhToday         === 'number' && d.solAhToday) ||
+    (typeof d.solarAhTodayRunning=== 'number' && d.solarAhTodayRunning) ||
+    0
+  );
+  document.getElementById("solAhToday").textContent = solAhTodayVal.toFixed(2);
+
+  // Istogramma FV (oggi/ieri) se presente
+  if (Array.isArray(d.solAhHourlyToday)) {
+    updateSolarAhBars(d.solAhHourlyToday);
+    const savedSolarDay = localStorage.getItem("solarAhDay") || "today";
+    showSolarAh(savedSolarDay);
+  }
+
+  // aggiorna il range scelto per il grafico minuto del solare
+  updateSolarCurrentRange();
+}
+
+
+function updateWaterPage(d){
+  if (!Number.isFinite(d.remainingLiters) || !Number.isFinite(d.capacity)) {
+    return;
+  }
+
+  waterPct = d.remainingLiters / d.capacity;
+
+  const wf = document.getElementById("waterFill");
+  if (wf) {
+    wf.style.height = Math.round(waterPct * 100) + "%";
+  }
+
+  const wp = document.getElementById("waterPercentLabel");
+  if (wp) {
+    const pct = Math.round(waterPct * 100);
+    wp.textContent = pct + "%";
+    wp.style.color = (waterPct < 0.20) ? "#ff3b30" : "#ccc";
+  }
+
+  document.getElementById("litriConsumati").textContent =
+    Number.isFinite(d.totalLiters)
+      ? itNumber1.format(d.totalLiters)
+      : "--";
+
+  document.getElementById("litriRimanenti").textContent =
+    itNumber1.format(d.remainingLiters);
+
+  document.getElementById("waterFlow").textContent =
+    Number.isFinite(d.flowLmin)
+      ? itNumber1.format(d.flowLmin)
+      : "--";
+}
+
+
+
+
+function updateGasPage(d){
+    gasPct1 = d.pct1 / 100;
+    gasPct2 = d.pct2 / 100;
+
+    gasKg1 = d.gas1;
+    gasKg2 = d.gas2;
+
+    updateGasUI();
+}
+
+
+function dropLeadingNulls(arr, labels) {
+    let start = 0;
+    while (start < arr.length && (arr[start] === null || arr[start] === undefined)) {
+        start++;
+    }
+    return {
+        values: arr.slice(start),
+        labels: labels.slice(start)
+    };
+}
+
+
+function scheduleNextFetch() {
+    clearTimeout(fetchTimer);
+    fetchTimer = setTimeout(fetchPageData, 1000);
+}
+
+
+// Sincronizza l'ora del BROWSER dentro l'ESP (usa /setTime?time=HH:MM)
+// così tutti i grafici orari generati dal firmware risultano coerenti.
+async function syncTime() {
+  try {
+    const n = new Date();
+
+    const yyyy = n.getFullYear();
+    const MM   = String(n.getMonth() + 1).padStart(2, '0');
+    const dd   = String(n.getDate()).padStart(2, '0');
+
+    const hh   = String(n.getHours()).padStart(2, '0');
+    const mm   = String(n.getMinutes()).padStart(2, '0');
+
+    const timestamp = `${yyyy}-${MM}-${dd} ${hh}:${mm}`;
+
+    await fetch(`/setTime?time=${timestamp}`, { method: 'GET', cache: 'no-store' });
+  } catch (e) {
+    console.warn('syncTime failed:', e);
+  }
+}
+
+
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    syncTime();
+    fetchPageData();
+  } else {
+    fetch("/levelSpeed?mode=slow").catch(()=>{});
+  }
+});
+
+
+window.onload = () => {
+  updateTitleClock();
+  setInterval(updateTitleClock, 1000);
+
+  // 1) Appena carichi la pagina → sincronizza subito
+  syncTime();
+
+  // 2) Poi ripeti ogni minuto per rimanere allineati
+  setInterval(syncTime, 60000);
+
+  // Inizializza range tensione su "Ultima ora" come attivo
+  const savedBatteryRange = Number(localStorage.getItem("range_batt")) || 1;
+  setRange(savedBatteryRange);  
+  
+  const savedSolarRange = Number(localStorage.getItem("range_solar")) || 1;  
+  setSolarRange(savedSolarRange);
+
+
+  // Ridisegna se cambia dimensione finestra
+  window.addEventListener("resize", () => {
+    if (currentPage === "livello") drawLevel();
+  });
+
+
+  // Inizializza i grafici per default
+  const savedAhDay = localStorage.getItem("ahDay") || "today";
+  showAhDay(savedAhDay);   
+  const savedAhChargeDay = localStorage.getItem("ahChargeDay") || "today";
+  showAhChargeDay(savedAhChargeDay); 
+
+
+  // Primo fetch subito (dopo la prima syncTime va benissimo)
+  fetchPageData();
+
+  // Pulsanti “reset”
+  bindResetButtons();
+};
+
+
+// === FUNZIONI MANCANTI: updateChart, setRange, showAhDay, showAhChargeDay
+// + minime utility per non far rompere nulla ===
+
+// (1) Chart della tensione: aggiorna la viewport in base a "selectedHours"
+
+let lastChartCount = 0;
+
+function updateChart() {
+  try {
+    if (!Array.isArray(fullEpoch) || !Array.isArray(fullValues)) return;
+    const total = Math.min(fullEpoch.length, fullValues.length);
+    if (total === 0) return;
+
+    const nowMin = Math.floor(Date.now() / 60000);
+    const cutoff =
+      selectedHours === 1 ? nowMin - 60 :
+      selectedHours === 6 ? nowMin - 360 :
+      nowMin - 1440;
+
+    // seleziona per TEMPO
+    const points = [];
+    for (let i = 0; i < total; i++) {
+      if (fullEpoch[i] >= cutoff) {
+        points.push(i);
+      }
+    }
+
+    if (points.length === 0) return;
+
+    const labels = points.map(i => fullLabels[i]);
+
+    const values = points.map(i => fullValues[i]);
+
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = values;
+    requestAnimationFrame(() => chart.update());
+  } catch (e) {
+    console.error("updateChart error:", e);
+  }
+}
+
+
+
+let lastCurrentCount = 0;
+function updateCurrentChart() {
+  try {
+    if (!Array.isArray(fullEpoch) || !Array.isArray(currentFullValues)) return;
+    const total = Math.min(fullEpoch.length, currentFullValues.length);
+    if (total === 0) return;
+
+    const nowMin = Math.floor(Date.now() / 60000);
+    const cutoff =
+      selectedHours === 1 ? nowMin - 60 :
+      selectedHours === 6 ? nowMin - 360 :
+      nowMin - 1440;
+
+    const points = [];
+    for (let i = 0; i < total; i++) {
+      if (fullEpoch[i] >= cutoff) {
+        points.push(i);
+      }
+    }
+
+    if (points.length === 0) return;
+
+    const labels = points.map(i => fullLabels[i]);
+
+    const values = points.map(i => currentFullValues[i]);
+
+    currentChart.data.labels = labels;
+    currentChart.data.datasets[0].data = values;
+    requestAnimationFrame(() => currentChart.update());
+  } catch (e) {
+    console.error("updateCurrentChart error:", e);
+  }
+}
+
+function setRange(h) {
+  selectedHours = h;
+  localStorage.setItem("range_batt", h);
+
+  updateChart();         // tensione
+  updateCurrentChart();  // corrente
+
+  const groups = document.querySelectorAll('.chart-buttons');
+  if (groups.length > 0) {
+    const rangeGroup = groups[0];
+    rangeGroup.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+    const map = {1: "Ultima ora", 6: "Ultime 6 ore", 24: "Ultime 24 ore"};
+    [...rangeGroup.querySelectorAll('button')].find(b => b.textContent.trim() === map[h])?.classList.add('active');
+  }
+}
+
+function setSolarRange(h) {
+    solarSelectedHours = h;
+    localStorage.setItem("range_solar", h); 
+
+    updateSolarCurrentRange();
+
+    const group = document.getElementById("solarRangeButtons");
+    if (group) {
+        group.querySelectorAll("button").forEach(btn => btn.classList.remove("active"));
+        const map = {1: "Ultima ora", 6: "Ultime 6 ore", 24: "Ultime 24 ore"};
+        [...group.querySelectorAll("button")]
+            .find(b => b.textContent.trim() === map[h])
+            ?.classList.add("active");
+    }
+}
+
+// Normalizza array orari (24 elementi o null)
+function normalizeHourlyArray(arr) {
+  const out = Array(24).fill(null);
+  if (!Array.isArray(arr)) return out;
+  for (let i = 0; i < Math.min(24, arr.length); i++) {
+    const v = arr[i];
+    out[i] = (v === null || v === undefined || v === "") ? null : Number(v);
+  }
+  return out;
+}
+
+// Chart "Ah consumati per ora"
+let ahHourlyChart = null;
+function ensureAhHourlyChart() {
+  if (ahHourlyChart) return;
+  const ctx = document.getElementById("ahHourlyChart")?.getContext("2d");
+  if (!ctx) return;
+
+  ahHourlyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: HOURS_LABELS,
+      datasets: [{
+        label: "Ah/ora",
+        data: Array(24).fill(null),
+        backgroundColor: "rgba(0,230,118,0.3)",
+        borderColor: "#00e676",
+        borderWidth: 1
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+        y: { ticks: { color: "#ccc" }, grid: { color: "#333" } }
+      }
+    }
+  });
+}
+
+
+function showAhDay(day) {
+  currentAhDay = day;
+  localStorage.setItem("ahDay", day);
+
+  ensureAhHourlyChart();
+  if (!ahHourlyChart) return;
+
+  const series = (day === "today") ? ahToday : ahYesterday;
+  ahHourlyChart.data.labels = HOURS_LABELS;
+  ahHourlyChart.data.datasets[0].data = series;
+  ahHourlyChart.update();
+
+  // Aggiorna totale Ah consumati
+  const total = (day === "today")
+      ? (window.lastData?.ahTodayTotal ?? 0)
+      : (window.lastData?.ahYesterdayTotal ?? 0);
+
+  document.getElementById("ahConsumedTotal").textContent =
+      `Totale ${day === "today" ? "oggi" : "ieri"}: ${total.toFixed(2)} Ah`;
+
+  document.querySelectorAll('[data-ahday]').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-ahday') === day);
+  });
+}
+
+
+// Chart "Ah ricaricati per ora"
+let ahChargeHourlyChart = null;
+function ensureAhChargeHourlyChart() {
+  if (ahChargeHourlyChart) return;
+  const ctx = document.getElementById("ahChargeHourlyChart")?.getContext("2d");
+  if (!ctx) return;
+
+  ahChargeHourlyChart = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels: HOURS_LABELS,
+      datasets: [{
+        label: "Ah ricaricati/ora",
+        data: Array(24).fill(null),
+        backgroundColor: "rgba(33,150,243,0.3)",
+        borderColor: "#2196f3",
+        borderWidth: 1
+      }]
+    },
+    options: {
+      animation: false,
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+        y: { ticks: { color: "#ccc" }, grid: { color: "#333" } }
+      }
+    }
+  });
+}
+
+
+// Chart "Ah ricaricati Solari per ora"
+
+let solarAhBar = null;
+function updateSolarAhBars(arr) {
+    if (!solarAhBar) {
+        const ctx = document.getElementById("solarAhBar").getContext("2d");
+        solarAhBar = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels: HOURS_LABELS,
+                datasets: [{
+                    label: "Ah prodotti",
+                    backgroundColor: "gold",
+                    borderColor: "#ffca28",
+                    borderWidth: 1,
+                    data: arr
+                }]
+            },
+            options: {
+                animation: false,
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks:{color:"#ccc"}, grid:{color:"#333"} },
+                    y: { ticks:{color:"#ccc"}, grid:{color:"#333"} }
+                }
+            }
+        });
+    } else {
+        solarAhBar.data.datasets[0].data = arr;
+        solarAhBar.update();
+    }
+}
+
+function showSolarAh(day) {
+    localStorage.setItem("solarAhDay", day);
+
+    const data = window.lastData;
+    if (!data) return;
+
+    const arr = (day === "today")
+        ? data.solAhHourlyToday
+        : data.solAhHourlyYesterday;
+
+    updateSolarAhBars(arr);
+
+    const tot = (day === "today")
+        ? data.solarAhTodayTotal
+        : data.solarAhYesterdayTotal;
+
+    document.getElementById("solarAhTotal").textContent =
+        `Totale ${day === "today" ? "oggi" : "ieri"}: ${tot.toFixed(2)} Ah`;
+
+    document.querySelectorAll("[data-solah]").forEach(b =>
+        b.classList.toggle("active", b.getAttribute("data-solah") === day)
+    );
+}
+
+
+
+function showAhChargeDay(day) {
+  currentAhChargeDay = day;
+  localStorage.setItem("ahChargeDay", day);
+  
+  ensureAhChargeHourlyChart();
+  if (!ahChargeHourlyChart) return;
+
+  const series = (day === "today") ? ahChargeToday : ahChargeYesterday;
+  ahChargeHourlyChart.data.labels = HOURS_LABELS;
+  ahChargeHourlyChart.data.datasets[0].data = series;
+  ahChargeHourlyChart.update();
+
+  // Aggiorna totale Ah caricati
+  const total = (day === "today")
+      ? (window.lastData?.ahChargeTodayTotal ?? 0)
+      : (window.lastData?.ahChargeYesterdayTotal ?? 0);
+
+  document.getElementById("ahChargeTotal").textContent =
+      `Totale ${day === "today" ? "oggi" : "ieri"}: ${total.toFixed(2)} Ah`;
+
+  document.querySelectorAll('[data-ahchargeday]').forEach(btn => {
+    btn.classList.toggle('active', btn.getAttribute('data-ahchargeday') === day);
+  });
+}
+
+
+function updateGasUI() {
+
+  // Bombola 1
+  const fill1 = document.getElementById("gasFill1");
+  fill1.style.height = (gasPct1 * 100) + "%";
+  fill1.style.background = (gasPct1 < 0.20) ? "#ff3b30" : "#ff9d00";
+
+  document.getElementById("gasKg1Label").textContent =
+      itNumber2.format(gasKg1) + " kg";
+  document.getElementById("gasPct1Label").textContent =
+      Math.round(gasPct1 * 100) + "%";
+
+  // Bombola 2
+  const fill2 = document.getElementById("gasFill2");
+  fill2.style.height = (gasPct2 * 100) + "%";
+  fill2.style.background = (gasPct2 < 0.20) ? "#ff3b30" : "#ff9d00";
+
+  document.getElementById("gasKg2Label").textContent =
+      itNumber2.format(gasKg2) + " kg";
+  document.getElementById("gasPct2Label").textContent =
+      Math.round(gasPct2 * 100) + "%";
+}
+
+
+
+function bindResetButtons(){
+
+
+  // --- Reset Ah batterie ---
+  const btnAh = document.getElementById('resetAhBtn');
+  btnAh?.addEventListener('click', async () => {
+    try {
+      const ah = prompt("Inserisci gli Ah REALI della batteria:");
+
+      if (ah === null) return; // se premi Annulla
+ 
+      const val = parseFloat(ah.replace(",", "."));
+      if (!isFinite(val) || val <= 0) {
+        alert("Valore non valido.");
+        return;
+      }
+      await fetch(`/setAh?val=${val}`, { method:'GET', cache:'no-store' });
+      fetchPageData(); // aggiorna UI
+    } catch (e) {
+      console.error('reset-ah failed', e);
+    }
+  });
+
+
+  // --- Reset serbatoio acqua ---
+  const btnWater = document.getElementById('resetTankBtn');
+  btnWater?.addEventListener('click', async () => {
+    try {
+      const litri = prompt("Quanti litri contiene ORA il serbatoio?");
+      if (litri === null) return;
+
+      const val = parseFloat(litri.replace(",", "."));
+      if (!isFinite(val) || val < 0) {
+        alert("Valore non valido.");
+        return;
+      }
+
+      await fetch(`/setTank?litri=${val}`, { method:'GET', cache:'no-store' });
+      fetchPageData();
+
+    } catch (e) {
+      console.error('setTank failed', e);
+    }
+  });
+
+  // --- Cambio bombola 1 ---
+  const btnGas1 = document.getElementById('resetGasBtn1');
+  btnGas1?.addEventListener('click', async () => {
+    try {
+      const kg = prompt("Inserisci i kg della bombola 1 piena:");
+      if (kg === null) return; // premuto Annulla
+      const val = parseFloat(kg.replace(",", "."));
+      if (!isFinite(val) || val <= 0) {
+        alert("Valore non valido.");
+        return;
+      }
+      await fetch(`/manualGas1?kg=${val}`, { method:'GET', cache:'no-store' });
+      fetchPageData();
+    } catch (e) {
+      console.error('reset-gas1 failed', e);
+    }
+  });
+
+  // --- Cambio bombola 2 ---
+  const btnGas2 = document.getElementById('resetGasBtn2');
+  btnGas2?.addEventListener('click', async () => {
+    try {
+      const kg = prompt("Inserisci i kg della bombola 2 piena:");
+      if (kg === null) return;
+      const val = parseFloat(kg.replace(",", "."));
+      if (!isFinite(val) || val <= 0) {
+        alert("Valore non valido.");
+        return;
+      }
+      await fetch(`/manualGas2?kg=${val}`, { method:'GET', cache:'no-store' });
+      fetchPageData();
+    } catch (e) {
+      console.error('reset-gas2 failed', e);
+    }
+  });
+
+
+    // --- Imposta efficienza di carica ---
+    const btnEff = document.getElementById('setEffBtn');
+    btnEff?.addEventListener('click', async () => {
+      try {
+        // Prompt: accetta "85", "85%", "0.85"
+        const input = prompt("Inserisci l'efficienza di carica (es. 85, 85% oppure 0.85):");
+        if (input === null) return; // Annulla
+    
+        let s = String(input).trim().replace(',', '.');
+        let eff;
+
+        if (s.endsWith('%')) {
+          // "85%" -> 0.85
+          const pct = parseFloat(s.slice(0, -1));
+          eff = pct / 100;
+        } else {
+          const v = parseFloat(s);
+          // Se l'utente inserisce un numero >1 presumiamo percentuale (85 -> 0.85)
+          eff = (isFinite(v) && v > 1) ? (v / 100) : v;
+        }
+
+        if (!isFinite(eff) || eff < 0.5 || eff > 1.0) {
+          alert("Valore non valido. Inserisci un numero tra 0.5 e 1.0 oppure tra 50% e 100%.");
+          return;
+        }
+
+        await fetch(`/setEff?val=${eff}`, { method:'GET', cache:'no-store' });
+        fetchPageData(); // aggiorna i dati (la tua UI mostra già "Efficienza: <span id='eff'>")
+      } catch (e) {
+        console.error('set-eff failed', e);
+      }
+    });
+
+
+// --- Livello: calibra a zero ---
+  document.getElementById("levelCalBtn")?.addEventListener("click", calibrateLevelZero);
+
+
+
+}
+
+
+function drawSemiGauge(canvas, pct, {
+  label = '',
+  color = '#00e676',
+  lowColor = LOW_COLOR,
+  lowThreshold = 0.2,
+  unit = '%',
+  min = 0,
+  max = 100
+} = {}) {
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  // Geometria
+  const cx = W/2;
+  const cy = H*0.95;
+  const radius = Math.min(W, H*1.9)/2 - 12;
+  const start = Math.PI;      // 180°
+  const end = 2*Math.PI;      // 360°
+
+  // Track
+  ctx.lineWidth = Math.max(16, radius*0.12);
+  ctx.strokeStyle = '#333';
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, start, end);
+  ctx.stroke();
+
+  // Arco valore
+  const clampPct = to01(pct ?? 0);
+  const valEnd = start + (end - start) * clampPct;
+  const valColor = (clampPct <= lowThreshold) ? lowColor : color;
+  ctx.strokeStyle = valColor;
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, start, valEnd);
+  ctx.stroke();
+
+  // Tacche (leggere, opzionali)
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = '#444';
+  const ticks = 5;
+  for (let i=0;i<=ticks;i++){
+    const t = start + (end-start)*(i/ticks);
+    const tx1 = cx + Math.cos(t)*(radius-6);
+    const ty1 = cy + Math.sin(t)*(radius-6);
+    const tx2 = cx + Math.cos(t)*(radius+6);
+    const ty2 = cy + Math.sin(t)*(radius+6);
+    ctx.beginPath();
+    ctx.moveTo(tx1, ty1);
+    ctx.lineTo(tx2, ty2);
+    ctx.stroke();
+  }
+
+  // Testi
+  ctx.fillStyle = '#e6e6e6';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Valore
+  const valuePct = min + clampPct * (max - min);
+  ctx.font = 'bold 56px Arial';
+  ctx.fillText(`${itInteger.format(valuePct)}${unit}`, cx, cy - radius*0.7);
+
+  // Etichetta
+  if (label) {
+    ctx.font = 'bold 24px Arial';
+    ctx.fillStyle = valColor;
+    ctx.fillText(label, cx, cy - radius*0.95);
+  }
+}
+
+/* ======================= LIVELLO CAMPER (pitch/roll da LIS) ====================== */
+
+// Stato livello
+let pitchDegRaw = 0;  // valori grezzi dal LIS
+let rollDegRaw  = 0;
+let pitchOffset = 0;  // offset di calibrazione (zero)
+let rollOffset  = 0;
+
+// Parametri grafici
+const LEVEL_TOL_DEG = 1.0; // tolleranza ±1°
+const LEVEL_MAX_DEG = 7.0; // scala visualizzata fino al bordo
+
+function getPitchDeg(){ return (pitchDegRaw - pitchOffset); }
+function getRollDeg(){  return (rollDegRaw  - rollOffset); }
+
+function updateLevelFromRaw(){
+  const p = getPitchDeg();
+  const r = getRollDeg();
+  const pTxt = document.getElementById("pitchVal");
+  const rTxt = document.getElementById("rollVal");
+  if (pTxt) pTxt.textContent = p.toFixed(1);
+  if (rTxt) rTxt.textContent = r.toFixed(1);
+}
+
+
+/* ========= AGGANCIO ALLA FUNZIONE ORIGINALE ========= */
+const _oldUpdateLevelFromRaw = updateLevelFromRaw;
+
+updateLevelFromRaw = function() {
+  _oldUpdateLevelFromRaw();   
+  updateCornerBars();         
+}; 
+
+
+/* ========= PARAMETRI CAMPER (Ducato 244) ========= */
+const WHEELBASE = 370;  // cm
+const WIDTH = 210;      // cm
+const MAX_CUNEO = 10;   // cm
+
+/* ----- Calcolo cm da compensare ai 4 angoli ----- */
+
+function updateCornerBars() {
+
+  const pitch = getPitchDeg();   // avanti/indietro
+  const roll  = getRollDeg();    // destra/sinistra
+
+  const pitchRad = pitch * Math.PI / 180;
+  const rollRad  = roll  * Math.PI / 180;
+
+  // metà dimensioni (dal centro del camper)
+  const halfWB = WHEELBASE / 2;
+  const halfW  = WIDTH / 2;
+
+  // inclinazioni convertite in cm
+  const front = Math.tan(pitchRad) * halfWB;
+  const rear  = -front;
+
+  const right = Math.tan(rollRad) * halfW;
+  const left  = -right;
+
+  const cmFL = Math.max(0, front + left);
+  const cmFR = Math.max(0, front + right);
+  const cmRL = Math.max(0, rear  + left);
+  const cmRR = Math.max(0, rear  + right);
+
+  setCorner("FL", cmFL);
+  setCorner("FR", cmFR);
+  setCorner("RL", cmRL);
+  setCorner("RR", cmRR);
+}
+
+function setCorner(id, cm) {
+  const box = document.getElementById("corner" + id);
+  const val = document.getElementById("val" + id);
+
+  if (!box || !val) return;
+
+  // Testo unico senza capo linea
+  val.textContent = cm.toFixed(1) + " cm";
+
+  // COLORI
+  if (cm < 0.1) {
+    box.style.background = "#00994d";
+    box.style.borderColor = "#00ff80";
+  }
+  else if (cm <= 10) {
+    box.style.background = "#c7a400";
+    box.style.borderColor = "#ffd900";
+  }
+  else {
+    box.style.background = "#7a0000";
+    box.style.borderColor = "#ff3b3b";
+  }
+
+  // Sollevamento grafico
+  const lift = Math.min(cm, 10) * 2.0;
+  box.style.transform = `translateY(${-lift}px)`;
+}
+
+
+
+
+function drawLevelFast(){
+  if (currentPage !== "livello") return;
+
+  const c = document.getElementById("levelCanvas");
+  if (!c) return;
+  const ctx = c.getContext("2d");
+  if (!ctx) return;
+
+  // Adatta al contenitore
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.clientWidth || 600;
+  const H = c.clientHeight || 360;
+  c.width  = Math.round(W * dpr);
+  c.height = Math.round(H * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  ctx.clearRect(0, 0, W, H);
+
+  // Geometria
+  const size  = Math.min(W, H) * 0.9;
+  const R     = size / 2;
+  const cx    = W / 2;
+  const cy    = H / 2;
+
+  // Sfondo
+  ctx.fillStyle = "#1a1a1a";
+  ctx.fillRect(0,0,W,H);
+
+  // Anello
+  ctx.lineWidth = Math.max(6, R*0.06);
+  ctx.strokeStyle = "#444";
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI*2);
+  ctx.stroke();
+
+  // Crociera
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#555";
+  ctx.beginPath();
+  ctx.moveTo(cx - R, cy);
+  ctx.lineTo(cx + R, cy);
+  ctx.moveTo(cx, cy - R);
+  ctx.lineTo(cx, cy + R);
+  ctx.stroke();
+
+  // Tolleranza
+  const tolR = R * (LEVEL_TOL_DEG / LEVEL_MAX_DEG);
+  ctx.setLineDash([5,7]);
+  ctx.strokeStyle = "#666";
+  ctx.beginPath();
+  ctx.arc(cx, cy, tolR, 0, Math.PI*2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Posizione bolla
+  const pitch = getPitchDeg(); // + avanti
+  const roll  = getRollDeg();  // + destra
+
+  const k = R / LEVEL_MAX_DEG;
+  let x = roll * k;
+  let y = -pitch * k;
+
+  const bubbleR = Math.max(10, R*0.09);
+
+  const dist = Math.hypot(x, y);
+  const maxDist = R - bubbleR - 2;
+
+  if (dist > maxDist){
+    const s = maxDist / dist;
+    x *= s; y *= s;
+  }
+
+  // Colore in/oltre tolleranza
+  const inTol = (Math.abs(pitch) <= LEVEL_TOL_DEG) && (Math.abs(roll) <= LEVEL_TOL_DEG);
+  const col = inTol ? "#00e676" : "#ff3b30";
+
+  // Bolla
+  ctx.fillStyle = col;
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(cx + x, cy + y, bubbleR, 0, Math.PI*2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+
+// === Loop FAST della livella (ridisegna a 30–60 FPS usando gli ultimi valori letti) ===
+let levelFastRAF = null;
+
+function levelFastLoop(){
+  if (currentPage === "livello") {
+    drawLevelFast();
+  }
+  levelFastRAF = requestAnimationFrame(levelFastLoop);
+}
+
+
+
+// Calibrazione: azzera agli attuali valori LIS
+function calibrateLevelZero(){
+  pitchOffset = pitchDegRaw;
+  rollOffset  = rollDegRaw;
+  updateLevelFromRaw();
+}
+
+/* ===================== LIVELLO – AGGIORNAMENTO RAPIDO ===================== */
+
+let levelLoopActive = false;
+let levelAbortCtrl = null;
+
+function startFastLevelPolling() {
+  stopFastLevelPolling();          // evita doppio loop
+  levelLoopActive = true;
+
+  const loop = async () => {
+    if (!levelLoopActive) return;
+
+    try {
+      if (levelAbortCtrl) levelAbortCtrl.abort();
+      levelAbortCtrl = new AbortController();
+
+      const url = `/level?t=${performance.now() | 0}`;
+      
+      console.log("FETCHING LEVEL:", url);
+      const r = await fetch(url, {
+
+        cache: 'no-store',
+        signal: levelAbortCtrl.signal,
+      });
+
+      if (r.ok) {
+        const d = await r.json();
+        if (typeof d.pitch === "number" && typeof d.roll === "number") {
+          pitchDegRaw = d.pitch;
+          rollDegRaw  = d.roll;
+
+          updateLevelFromRaw();
+        }
+      }
+    } catch (e) {
+      // abort o errore rete, ignora
+    }
+
+    if (levelLoopActive) {
+      setTimeout(loop, 200);   // 5 Hz reali
+    }
+  };
+
+  loop();
+}
+
+function stopFastLevelPolling() {
+  levelLoopActive = false;
+  if (levelAbortCtrl) {
+    try { levelAbortCtrl.abort(); } catch {}
+    levelAbortCtrl = null;
+  }
+}
+
+</script>
+</body>
+</html>
