@@ -26,6 +26,7 @@
 #include "gas/gas_manager.h"
 #include "water/water_manager.h"
 #include "level/level_manager.h"
+#include "time/time_manager.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -87,7 +88,6 @@ bool timeValid = false;
 // ---- FUSO ORARIO AUTOMATICO (Bergamo: CET/CEST) ----
 int8_t tzOffsetHours = 1;       // UTC+1 inverno, UTC+2 estate
 bool tzIsDST = false;           // true quando è ora legale
-void updateDST();               // calcola DST automaticamente
 time_t localToUtc(time_t localEpoch);
 time_t utcToLocal(time_t utcEpoch);
 
@@ -705,42 +705,6 @@ void i2cScan() {
 time_t nowEpoch() {
   if (!timeValid) return 0;
   return rtcBaseEpoch + (millis() - rtcBaseMillis) / 1000;
-}
-
-// ---- FUSO ORARIO: calcolo DST europeo ----
-// Regola UE: ultima domenica di marzo alle 02:00 → 03:00 (DST on)
-//            ultima domenica di ottobre alle 03:00 → 02:00 (DST off)
-void updateDST() {
-  if (!timeValid) return;
-
-  time_t utcNow = nowEpoch();
-  tmElements_t tmUtc;
-  breakTime(utcNow, tmUtc);
-
-  int year  = tmUtc.Year + 1970;
-  int month = tmUtc.Month;
-  int day   = tmUtc.Day;
-  int hour  = tmUtc.Hour;
-
-  // Ultima domenica di marzo
-  int marchLastSun = 31 - ((5 * year / 4 + 4) % 7);
-  // Ultima domenica di ottobre
-  int octLastSun = 31 - ((5 * year / 4 + 1) % 7);
-
-  bool dst = false;
-
-  if (month > 3 && month < 10) {
-    dst = true;  // Aprile-Settembre: sicuramente DST
-  } else if (month == 3) {
-    if (day > marchLastSun) dst = true;
-    else if (day == marchLastSun && hour >= 2) dst = true;
-  } else if (month == 10) {
-    if (day < octLastSun) dst = true;
-    else if (day == octLastSun && hour < 1) dst = true;
-  }
-
-  tzIsDST = dst;
-  tzOffsetHours = dst ? 2 : 1;
 }
 
 // Converte epoch locale (come arriva dal telefono) in UTC
