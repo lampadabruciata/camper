@@ -9,6 +9,7 @@ extern SemaphoreHandle_t sdMutex;
 extern bool initSD();
 extern void logCrash(const char *reason);
 extern void i2cRecoverBus(void);
+extern bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name);
 
 // Variabili globali gas (definite in main.cpp)
 extern float gasResidual1;
@@ -23,6 +24,28 @@ extern bool scale1Ready;
 extern bool scale2Ready;
 extern HX711 scale1;
 extern HX711 scale2;
+
+// Mutex per HX711
+extern SemaphoreHandle_t hxMutex;
+
+// ============================================================
+// WRAPPER THREAD-SAFE PER HX711 (usa hxMutex)
+// ============================================================
+bool scaleSafeGetUnits(HX711 &scale, long samples, float &out) {
+  if (!takeMutexWarn(hxMutex, 300, "hx")) return false;
+  bool ok = scale.is_ready();
+  if (ok) out = scale.get_units(samples);
+  xSemaphoreGive(hxMutex);
+  return ok;
+}
+
+bool scaleSafeTare(HX711 &scale) {
+  if (!takeMutexWarn(hxMutex, 600, "hx")) return false;
+  bool ok = scale.is_ready();
+  if (ok) scale.tare();
+  xSemaphoreGive(hxMutex);
+  return ok;
+}
 
 // ============================================================
 // MUTEX TIMEOUT LOGGER (max 1 messaggio al secondo per mutex)
@@ -39,7 +62,7 @@ bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name) {
     Serial.printf("[WARN] MUTEX '%s' TIMEOUT (> %u ms)\n", name ? name : "?", (unsigned)timeoutMs);
     logCrash("Mutex timeout");   // scrive su /crashlog.txt lo stato corrente
 
-    // Se è il bus I2C che va in timeout ripetutamente, tenta recovery
+    // Se e il bus I2C che va in timeout ripetutamente, tenta recovery
     if (name && strcmp(name, "i2c") == 0) {
       static unsigned long firstErrTs = 0;
       static uint8_t errCount = 0;
@@ -85,7 +108,7 @@ void saveGasToSD(const char* filename, float kg) {
     
     float lastValue = loadGasFromSD(filename);
 
-    // Se non è cambiato niente, inutile scrivere su SD
+    // Se non e cambiato niente, inutile scrivere su SD
     if (fabs(lastValue - kg) < 0.01f) {
         return;
     }
@@ -139,7 +162,7 @@ float loadGasFromSD(const char* filename) {
   f.close();
   xSemaphoreGive(sdMutex);
 
-s.trim();
+  s.trim();
   return s.toFloat();
 }
 

@@ -754,8 +754,6 @@ time_t utcToLocal(time_t utcEpoch) {
 
 
 void LevelTask(void *param);
-bool scaleSafeGetUnits(HX711 &scale, long samples, float &out);
-bool scaleSafeTare(HX711 &scale);
 
 // Livella LIS3DH
 bool  initLIS3DH();
@@ -765,6 +763,7 @@ void  appendLevelToJson(JsonDocument &json);
 bool saveLevelZeroToSD(float roll0, float pitch0);
 bool loadLevelZeroFromSD(float &roll0, float &pitch0);
 bool clearLevelZeroOnSD();
+
 
 // Ah
 void restoreAhFromPrefs();
@@ -913,27 +912,6 @@ void updateGas(HX711 &scale,
   }
 }
 
-// ================================================
-// Wrapper thread-safe per HX711 (usa hxMutex)
-// ================================================
-bool scaleSafeGetUnits(HX711 &scale, long samples, float &out) {
-  if (!takeMutexWarn(hxMutex, 300, "hx")) return false;
-  bool ok = scale.is_ready();
-  if (ok) out = scale.get_units(samples);
-  xSemaphoreGive(hxMutex);
-  return ok;
-}
-
-bool scaleSafeTare(HX711 &scale) {
-  if (!takeMutexWarn(hxMutex, 600, "hx")) return false;
-  bool ok = scale.is_ready();
-  if (ok) scale.tare();
-  xSemaphoreGive(hxMutex);
-  return ok;
-}
-
-
-
 // =======================================================
 // ==================  GESTIONE ACQUA  ===================
 // =======================================================
@@ -944,6 +922,7 @@ void IRAM_ATTR pulseCounter() {
     pulseCount++;
   }
   lastPulseMicros = t;
+
 }
 
 void saveLastLitersToSD(float liters) {
@@ -4205,3 +4184,4 @@ case 3: {
     }
 
   }
+
