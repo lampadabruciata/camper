@@ -10,4 +10,7 @@ float loadLastLitersFromSD();
 // Ripristina litri consumati da SD
 void restoreLitersFromSD();
 
+// Imposta capacità serbatoio acqua
+void handleSetTank();
+
 #endif // WATER_MANAGER_H

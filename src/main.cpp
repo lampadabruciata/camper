@@ -784,9 +784,9 @@ void  updateCurrentAndVoltage();
 // Acqua
 void  saveLastLitersToSD(float liters);
 float loadLastLitersFromSD();
-void  handleSetTank();
 
 // Gas
+
 void  saveGasToSD(const char* filename, float kg);
 float loadGasFromSD(const char* filename);
 
@@ -872,26 +872,8 @@ void IRAM_ATTR pulseCounter() {
 
 }
 
-
-void handleSetTank() {
-  if (!server.hasArg("litri")) {
-    server.send(400, "text/plain", "errore: manca litri");
-    return;
-  }
-
-  float L = server.arg("litri").toFloat();
-  if (L < 0) L = 0;
-  if (L > tankCapacity) L = tankCapacity;
-
-  totalLitersConsumed = tankCapacity - L;  // consumo = pieno - residuo
-  remainingLiters = L;
-
-  saveLastLitersToSD(totalLitersConsumed);
-
-  server.send(200, "text/plain", "ok");
-}
-
 void appendWaterDataToJson(JsonDocument &json) {
+
   json["flowLmin"]        = lastFlowLmin;
   json["totalLiters"]     = totalLitersConsumed;
   json["remainingLiters"] = remainingLiters;

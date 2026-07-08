@@ -1,6 +1,7 @@
 #include "water_manager.h"
 #include <SD.h>
 #include <Arduino.h>
+#include <WebServer.h>
 #include <freertos/semphr.h>
 
 // Dichiarazioni esterne (definite in main.cpp)
@@ -8,6 +9,7 @@ extern SemaphoreHandle_t sdMutex;
 extern bool initSD();
 extern bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name);
 extern void debugSDWriteResult(const char* file, bool ok, size_t written, uint32_t microsTime);
+extern WebServer server;
 
 // Variabili globali per l'acqua (definite in main.cpp)
 extern volatile float totalLitersConsumed;
@@ -90,3 +92,32 @@ void restoreLitersFromSD() {
   remainingLiters = tankCapacity - totalLitersConsumed;
   if (remainingLiters < 0) remainingLiters = 0;
 }
+
+
+// ============================================================
+// IMPOSTAZIONE CAPACITÀ SERBATOIO ACQUA
+// Endpoint: /setTank?val=<liters>
+// ============================================================
+void handleSetTank() {
+  if (!server.hasArg("val")) {
+    server.send(400, "text/plain", "missing val");
+    return;
+  }
+
+  float v = server.arg("val").toFloat();
+  if (v < 1) v = 1;  // capacità minima accettabile
+
+  // Aggiorna capacità serbatoio
+  tankCapacity = v;
+
+  // Reset litri consumati e aggiorna rimanenti
+  totalLitersConsumed = 0.0f;
+  remainingLiters = tankCapacity;
+
+  // Salva su SD
+  saveLastLitersToSD(0.0f);
+
+  server.send(200, "text/plain", "ok");
+  Serial.printf("[WATER] Nuova capacità serbatoio: %.1f L\n", v);
+}
+
