@@ -25,6 +25,7 @@
 
 #include "gas/gas_manager.h"
 #include "water/water_manager.h"
+#include "level/level_manager.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -759,7 +760,6 @@ void LevelTask(void *param);
 // Livella LIS3DH
 bool  initLIS3DH();
 void  updateLevel();                   // lettura + calcolo roll/pitch
-void  captureLevelZero();              // legge e salva come "zero"
 void  appendLevelToJson(JsonDocument &json);
 bool saveLevelZeroToSD(float roll0, float pitch0);
 bool loadLevelZeroFromSD(float &roll0, float &pitch0);
@@ -3548,45 +3548,6 @@ void updateLevel() {
     lvl_pitch = (1.0f - alphaLevel) * lvl_pitch + alphaLevel * pitch;
 
     levelReady = true;
-}
-
-// Legge una volta e salva gli offset zero in NVS (tramite PrefsTask)
-void captureLevelZero() {
-  sensors_event_t ev;
-  bool ok = false;
-
-  if (xSemaphoreTake(i2cMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-    ok = lis.getEvent(&ev);
-    xSemaphoreGive(i2cMutex);
-  }
-  if (!ok) return;
-
-  float ax = ev.acceleration.x / 9.80665f;
-  float ay = ev.acceleration.y / 9.80665f;
-  float az = ev.acceleration.z / 9.80665f;
-
-  float roll_raw  = atan2f(ay, az) * 57.2957795f;
-  float pitch_raw = atan2f(-ax, sqrtf(ay*ay + az*az)) * 57.2957795f;
-
-  // Aggiorna offset in RAM
-  lvl_roll_zero  = roll_raw;
-  lvl_pitch_zero = pitch_raw;
-
-  // Persisti con PrefsTask (NVS)
-  PrefsMessage mr, mp;
-  mr.cmd    = CMD_SAVE_LEVEL_R0;
-  mr.fvalue = lvl_roll_zero;
-  mr.ivalue = 0;
-
-  mp.cmd    = CMD_SAVE_LEVEL_P0;
-  mp.fvalue = lvl_pitch_zero;
-  mp.ivalue = 0;
-
-  xQueueSend(prefsQueue, &mr, 0);
-  xQueueSend(prefsQueue, &mp, 0);
-
-  // Persisti anche su SD
-  saveLevelZeroToSD(lvl_roll_zero, lvl_pitch_zero);
 }
 
 void appendLevelToJson(JsonDocument &json) {
