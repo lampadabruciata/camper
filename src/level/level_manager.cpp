@@ -87,3 +87,40 @@ bool saveLevelZeroToSD(float roll0, float pitch0) {
   xSemaphoreGive(sdMutex);
   return (n > 0);
 }
+
+// Carica i valori di zero livella da SD
+bool loadLevelZeroFromSD(float &roll0, float &pitch0) {
+  if (!initSD()) return false;
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500)) != pdTRUE) return false;
+
+  if (!SD.exists("/level_zero.txt")) {
+    xSemaphoreGive(sdMutex);
+    return false;
+  }
+  File f = SD.open("/level_zero.txt", FILE_READ);
+  if (!f) { xSemaphoreGive(sdMutex); return false; }
+  String s = f.readStringUntil('\n');
+  f.close();
+  xSemaphoreGive(sdMutex);
+
+  s.trim();
+  int comma = s.indexOf(',');
+  if (comma < 0) return false;
+  String a = s.substring(0, comma);
+  String b = s.substring(comma + 1);
+  roll0  = a.toFloat();
+  pitch0 = b.toFloat();
+  return true;
+}
+
+// Cancella i valori di zero livella dalla SD
+bool clearLevelZeroOnSD() {
+  if (!initSD()) return false;
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500)) != pdTRUE) return false;
+  bool ok = true;
+  if (SD.exists("/level_zero.txt")) {
+    ok = SD.remove("/level_zero.txt");
+  }
+  xSemaphoreGive(sdMutex);
+  return ok;
+}

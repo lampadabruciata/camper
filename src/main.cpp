@@ -761,8 +761,6 @@ void LevelTask(void *param);
 bool  initLIS3DH();
 void  updateLevel();                   // lettura + calcolo roll/pitch
 void  appendLevelToJson(JsonDocument &json);
-bool loadLevelZeroFromSD(float &roll0, float &pitch0);
-bool clearLevelZeroOnSD();
 
 
 // Ah
@@ -3555,41 +3553,6 @@ void appendLevelToJson(JsonDocument &json) {
   json["levelOk"]     = (fabs(lvl_roll) <= LEVEL_OK_DEG) && (fabs(lvl_pitch) <= LEVEL_OK_DEG);
   json["levelZeroR"]  = lvl_roll_zero;   // offset roll salvato
   json["levelZeroP"]  = lvl_pitch_zero;  // offset pitch salvato
-}
-
-bool loadLevelZeroFromSD(float &roll0, float &pitch0) {
-  if (!initSD()) return false;
-  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500)) != pdTRUE) return false;
-
-  if (!SD.exists("/level_zero.txt")) {
-    xSemaphoreGive(sdMutex);
-    return false;
-  }
-  File f = SD.open("/level_zero.txt", FILE_READ);
-  if (!f) { xSemaphoreGive(sdMutex); return false; }
-  String s = f.readStringUntil('\n');
-  f.close();
-  xSemaphoreGive(sdMutex);
-
-  s.trim();
-  int comma = s.indexOf(',');
-  if (comma < 0) return false;
-  String a = s.substring(0, comma);
-  String b = s.substring(comma + 1);
-  roll0  = a.toFloat();
-  pitch0 = b.toFloat();
-  return true;
-}
-
-bool clearLevelZeroOnSD() {
-  if (!initSD()) return false;
-  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500)) != pdTRUE) return false;
-  bool ok = true;
-  if (SD.exists("/level_zero.txt")) {
-    ok = SD.remove("/level_zero.txt");
-  }
-  xSemaphoreGive(sdMutex);
-  return ok;
 }
 
   // =======================================================
