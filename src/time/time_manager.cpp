@@ -1,5 +1,5 @@
 #include "time_manager.h"
-
+#include <Arduino.h>
 // ---- FUSO ORARIO: calcolo DST europeo ----
 // Regola UE: ultima domenica di marzo alle 02:00 → 03:00 (DST on)
 //            ultima domenica di ottobre alle 03:00 → 02:00 (DST off)
@@ -39,4 +39,15 @@ tzIsDST = dst;
 // Converte epoch UTC in epoch locale (per display e grafici)
 time_t utcToLocal(time_t utcEpoch) {
   return utcEpoch + (tzOffsetHours * 3600);
+}
+
+// Ottieni epoch corrente (UTC)
+time_t nowEpoch() {
+  if (!timeValid) return 0;
+  return rtcBaseEpoch + (millis() - rtcBaseMillis) / 1000;
+}
+
+// Converte epoch locale in UTC
+time_t localToUtc(time_t localEpoch) {
+  return localEpoch - (tzOffsetHours * 3600);
 }

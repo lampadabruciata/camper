@@ -88,7 +88,6 @@ bool timeValid = false;
 // ---- FUSO ORARIO AUTOMATICO (Bergamo: CET/CEST) ----
 int8_t tzOffsetHours = 1;       // UTC+1 inverno, UTC+2 estate
 bool tzIsDST = false;           // true quando è ora legale
-time_t localToUtc(time_t localEpoch);
 
 
 // =======================================================
@@ -698,16 +697,6 @@ void i2cScan() {
     Serial.println("⚠ Nessun device I2C rilevato.");
   else
     Serial.printf("✓ Totale device trovati: %u\n", found);
-}
-
-time_t nowEpoch() {
-  if (!timeValid) return 0;
-  return rtcBaseEpoch + (millis() - rtcBaseMillis) / 1000;
-}
-
-// Converte epoch locale (come arriva dal telefono) in UTC
-time_t localToUtc(time_t localEpoch) {
-  return localEpoch - (tzOffsetHours * 3600);
 }
 
 
