@@ -9,6 +9,11 @@ extern bool initSD();
 extern bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name);
 extern void debugSDWriteResult(const char* file, bool ok, size_t written, uint32_t microsTime);
 
+// Variabili globali per l'acqua (definite in main.cpp)
+extern volatile float totalLitersConsumed;
+extern volatile float remainingLiters;
+extern float tankCapacity;
+
 // ============================================================
 // SALVATAGGIO LITRI ACQUA SU SD
 // ============================================================
@@ -66,4 +71,22 @@ float loadLastLitersFromSD() {
 
   s.trim();
   return s.toFloat();
+}
+
+
+// ============================================================
+// RIPRISTINA LITRI CONSUMATI DA SD
+// ============================================================
+void restoreLitersFromSD() {
+  float v = loadLastLitersFromSD();
+
+  if (v >= 0)
+    totalLitersConsumed = v;
+  else {
+    totalLitersConsumed = 0.0f;
+    saveLastLitersToSD(0.0f); // ha mutex interno
+  }
+
+  remainingLiters = tankCapacity - totalLitersConsumed;
+  if (remainingLiters < 0) remainingLiters = 0;
 }

@@ -282,7 +282,7 @@ volatile unsigned long pulseCount = 0;
 volatile unsigned long lastPulseMicros = 0;
 
 const float calibrationFactor = 450.0f;   // impulsi/L
-const float tankCapacity = 100.0f;        // capacità serbatoio (L)
+float tankCapacity = 100.0f;        // capacità serbatoio (L) - accessibile da water_manager
 
 volatile float totalLitersConsumed = 0.0f;
 volatile float lastFlowLmin = 0.0f;
@@ -784,7 +784,6 @@ void  updateCurrentAndVoltage();
 // Acqua
 void  saveLastLitersToSD(float liters);
 float loadLastLitersFromSD();
-void  restoreLitersFromSD();
 void  handleSetTank();
 
 // Gas
@@ -873,20 +872,6 @@ void IRAM_ATTR pulseCounter() {
 
 }
 
-
-void restoreLitersFromSD() {
-  float v = loadLastLitersFromSD();
-
-  if (v >= 0)
-    totalLitersConsumed = v;
-  else {
-    totalLitersConsumed = 0.0f;
-    saveLastLitersToSD(0.0f); // ha mutex interno
-  }
-
-  remainingLiters = tankCapacity - totalLitersConsumed;
-  if (remainingLiters < 0) remainingLiters = 0;
-}
 
 void handleSetTank() {
   if (!server.hasArg("litri")) {

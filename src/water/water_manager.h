@@ -7,4 +7,7 @@ void saveLastLitersToSD(float liters);
 // Caricamento litri acqua da SD
 float loadLastLitersFromSD();
 
+// Ripristina litri consumati da SD
+void restoreLitersFromSD();
+
 #endif // WATER_MANAGER_H
