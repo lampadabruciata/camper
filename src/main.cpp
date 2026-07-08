@@ -24,6 +24,7 @@
 #include <freertos/semphr.h>
 
 #include "gas/gas_manager.h"
+#include "water/water_manager.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -870,59 +871,6 @@ void IRAM_ATTR pulseCounter() {
   }
   lastPulseMicros = t;
 
-}
-
-void saveLastLitersToSD(float liters) {
-  if (!initSD()) return;
-
-  if (!takeMutexWarn(sdMutex, 500, "sd"))
-    return;
-
-  const char* tempname = "/.tmp_liters.txt";
-  File tmp = SD.open(tempname, FILE_WRITE);
-  if (!tmp) {
-    xSemaphoreGive(sdMutex);
-    return;
-  }
-
-  tmp.seek(0);
-  uint32_t t0 = micros();
-  int w = tmp.print(liters, 3);
-  tmp.print('\n');
-  debugSDWriteResult("/last_liters.txt", (w > 0), w, micros() - t0);
-  tmp.flush();
-  tmp.close();
-
-  SD.remove("/last_liters.txt");
-  SD.rename(tempname, "/last_liters.txt");
-
-  xSemaphoreGive(sdMutex);
-}
-
-
-float loadLastLitersFromSD() {
-  if (!initSD()) return -1;
-
-  if (!takeMutexWarn(sdMutex, 500, "sd"))
-    return -1;
-
-  if (!SD.exists("/last_liters.txt")) {
-    xSemaphoreGive(sdMutex);
-    return -1;
-  }
-
-  File f = SD.open("/last_liters.txt", FILE_READ);
-  if (!f) {
-    xSemaphoreGive(sdMutex);
-    return -1;
-  }
-
-  String s = f.readStringUntil('\n');
-  f.close();
-  xSemaphoreGive(sdMutex);
-
-  s.trim();
-  return s.toFloat();
 }
 
 
