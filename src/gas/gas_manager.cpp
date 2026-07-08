@@ -2,12 +2,27 @@
 #include <SD.h>
 #include <Arduino.h>
 #include <freertos/semphr.h>
+#include "HX711.h"
 
 // Dichiarazioni esterne (definite in main.cpp)
 extern SemaphoreHandle_t sdMutex;
 extern bool initSD();
 extern void logCrash(const char *reason);
 extern void i2cRecoverBus(void);
+
+// Variabili globali gas (definite in main.cpp)
+extern float gasResidual1;
+extern float gasResidual2;
+extern float gasInitial1;
+extern float gasInitial2;
+extern float gasConsumed1;
+extern float gasConsumed2;
+extern float lastScale1Reading;
+extern float lastScale2Reading;
+extern bool scale1Ready;
+extern bool scale2Ready;
+extern HX711 scale1;
+extern HX711 scale2;
 
 // ============================================================
 // MUTEX TIMEOUT LOGGER (max 1 messaggio al secondo per mutex)
@@ -124,6 +139,38 @@ float loadGasFromSD(const char* filename) {
   f.close();
   xSemaphoreGive(sdMutex);
 
-  s.trim();
+s.trim();
   return s.toFloat();
+}
+
+// ============================================================
+// RIPRISTINO GAS DA SD
+// ============================================================
+void restoreGasFromSD() {
+  gasResidual1 = loadGasFromSD("/last_gas1.txt");
+  gasResidual2 = loadGasFromSD("/last_gas2.txt");
+
+  gasInitial1 = gasResidual1;
+  gasConsumed1 = 0.0f;
+
+  gasInitial2 = gasResidual2;
+  gasConsumed2 = 0.0f;
+
+  // ----------- BOMBOLA 1 -----------
+  if (scale1.is_ready()) {
+    lastScale1Reading = scale1.get_units(5);
+    scale1Ready = true;            // abbiamo una lettura valida
+  } else {
+    lastScale1Reading = gasResidual1;  // fallback sicuro
+    scale1Ready = false;
+  }
+
+  // ----------- BOMBOLA 2 -----------
+  if (scale2.is_ready()) {
+    lastScale2Reading = scale2.get_units(5);
+    scale2Ready = true;
+  } else {
+    lastScale2Reading = gasResidual2;
+    scale2Ready = false;
+  }
 }

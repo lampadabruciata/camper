@@ -790,7 +790,6 @@ void  handleSetTank();
 // Gas
 void  saveGasToSD(const char* filename, float kg);
 float loadGasFromSD(const char* filename);
-void  restoreGasFromSD();
 void updateGas(HX711 &scale,
                float &gasInitial,
                float &gasConsumed,
@@ -869,36 +868,6 @@ void i2cRecoverBus(void) {
 // =======================================================
 // ================  FUNZIONI HX711 GAS  =================
 // =======================================================
-
-void restoreGasFromSD() {
-  gasResidual1 = loadGasFromSD("/last_gas1.txt");
-  gasResidual2 = loadGasFromSD("/last_gas2.txt");
-
-  gasInitial1 = gasResidual1;
-  gasConsumed1 = 0.0f;
-
-  gasInitial2 = gasResidual2;
-  gasConsumed2 = 0.0f;
-
-  // ----------- BOMBOLA 1 -----------
-  if (scale1.is_ready()) {
-    lastScale1Reading = scale1.get_units(5);
-    scale1Ready = true;            // abbiamo una lettura valida
-  } else {
-    lastScale1Reading = gasResidual1;  // fallback sicuro
-    scale1Ready = false;
-  }
-
-  // ----------- BOMBOLA 2 -----------
-  if (scale2.is_ready()) {
-    lastScale2Reading = scale2.get_units(5);
-    scale2Ready = true;
-  } else {
-    lastScale2Reading = gasResidual2;
-    scale2Ready = false;
-  }
-}
-
 
 void updateGas(HX711 &scale,
                float &gasInitial,
