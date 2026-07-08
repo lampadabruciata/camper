@@ -1,0 +1,9 @@
+adafruit/Adafruit ADS1X15
+adafruit/Adafruit Unified Sensor
+adafruit/Adafruit LIS3DH
+paulstoffregen/Time
+adafruit/DHT sensor library
+olikraus/U8g2
+bblanchon/ArduinoJson
+bogde/HX711
+adafruit/RTClib
