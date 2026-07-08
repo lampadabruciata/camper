@@ -28,6 +28,13 @@ extern HX711 scale2;
 // Mutex per HX711
 extern SemaphoreHandle_t hxMutex;
 
+// Mutex per sezione critica stato
+extern portMUX_TYPE stateMux;
+
+// Macro per sezione critica (definite in main.cpp)
+#define STATE_ENTER() taskENTER_CRITICAL(&stateMux)
+#define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
+
 // ============================================================
 // WRAPPER THREAD-SAFE PER HX711 (usa hxMutex)
 // ============================================================
@@ -195,5 +202,52 @@ void restoreGasFromSD() {
   } else {
     lastScale2Reading = gasResidual2;
     scale2Ready = false;
+  }
+}
+
+// ============================================================
+// AGGIORNAMENTO GAS
+// ============================================================
+void updateGas(HX711 &scale,
+               float &gasInitial,
+               float &gasConsumed,
+               float &gasResidual,
+               float &lastReading,
+               const char* filename,
+               unsigned long &lastSaveTs,
+               volatile bool &forceSaveFlag,
+               bool &scaleReady)
+{
+  // 1) Lettura protetta HX711
+  float currentReading = 0.0f;
+  if (!scaleSafeGetUnits(scale, 5, currentReading)) {
+    return; // scala non pronta o mutex non ottenuto
+  }
+
+  // 2) Prima lettura valida
+  if (!scaleReady) {
+    STATE_ENTER();
+    lastReading = currentReading;
+    scaleReady  = true;
+    STATE_EXIT();
+    return;
+  }
+
+  // 3) Calcoli stato in sezione critica (breve)
+  float delta = 0.0f;
+  STATE_ENTER();
+  delta = lastReading - currentReading;     // diminuzione = consumo
+  gasConsumed += delta;
+  gasResidual  = gasInitial - gasConsumed;
+  if (gasResidual < 0) gasResidual = 0;
+  lastReading = currentReading;
+  STATE_EXIT();
+
+  // 4) Salvataggio periodico o forzato (fuori dalla sezione critica)
+  unsigned long now = millis();
+  if (forceSaveFlag || (now - lastSaveTs >= 30000UL)) {
+    saveGasToSD(filename, gasResidual);
+    lastSaveTs    = now;
+    forceSaveFlag = false;
   }
 }

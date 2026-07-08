@@ -789,15 +789,6 @@ void  handleSetTank();
 // Gas
 void  saveGasToSD(const char* filename, float kg);
 float loadGasFromSD(const char* filename);
-void updateGas(HX711 &scale,
-               float &gasInitial,
-               float &gasConsumed,
-               float &gasResidual,
-               float &lastReading,
-               const char* filename,
-               unsigned long &lastSaveTs,
-               volatile bool &forceSaveFlag,
-               bool &scaleReady);
 
 
 // Web
@@ -867,50 +858,6 @@ void i2cRecoverBus(void) {
 // =======================================================
 // ================  FUNZIONI HX711 GAS  =================
 // =======================================================
-
-void updateGas(HX711 &scale,
-               float &gasInitial,
-               float &gasConsumed,
-               float &gasResidual,
-               float &lastReading,
-               const char* filename,
-               unsigned long &lastSaveTs,
-               volatile bool &forceSaveFlag,
-               bool &scaleReady)
-{
-  // 1) Lettura protetta HX711
-  float currentReading = 0.0f;
-  if (!scaleSafeGetUnits(scale, 5, currentReading)) {
-    return; // scala non pronta o mutex non ottenuto
-  }
-
-  // 2) Prima lettura valida
-  if (!scaleReady) {
-    STATE_ENTER();
-    lastReading = currentReading;
-    scaleReady  = true;
-    STATE_EXIT();
-    return;
-  }
-
-  // 3) Calcoli stato in sezione critica (breve)
-  float delta = 0.0f;
-  STATE_ENTER();
-  delta = lastReading - currentReading;     // diminuzione = consumo
-  gasConsumed += delta;
-  gasResidual  = gasInitial - gasConsumed;
-  if (gasResidual < 0) gasResidual = 0;
-  lastReading = currentReading;
-  STATE_EXIT();
-
-  // 4) Salvataggio periodico o forzato (fuori dalla sezione critica)
-  unsigned long now = millis();
-  if (forceSaveFlag || (now - lastSaveTs >= 30000UL)) {
-    saveGasToSD(filename, gasResidual);
-    lastSaveTs    = now;
-    forceSaveFlag = false;
-  }
-}
 
 // =======================================================
 // ==================  GESTIONE ACQUA  ===================

@@ -16,4 +16,15 @@ void restoreGasFromSD();
 bool scaleSafeGetUnits(HX711 &scale, long samples, float &out);
 bool scaleSafeTare(HX711 &scale);
 
+// Aggiornamento gas
+void updateGas(HX711 &scale,
+               float &gasInitial,
+               float &gasConsumed,
+               float &gasResidual,
+               float &lastReading,
+               const char* filename,
+               unsigned long &lastSaveTs,
+               volatile bool &forceSaveFlag,
+               bool &scaleReady);
+
 #endif // GAS_MANAGER_H
