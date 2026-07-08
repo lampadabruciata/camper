@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <freertos/semphr.h>
 #include <Adafruit_LIS3DH.h>
+#include <SD.h>
 
 // Dichiarazioni esterne (definite in main.cpp)
 extern SemaphoreHandle_t i2cMutex;
@@ -9,6 +10,12 @@ extern Adafruit_LIS3DH lis;
 extern volatile float lvl_roll_zero;
 extern volatile float lvl_pitch_zero;
 extern QueueHandle_t prefsQueue;
+extern SemaphoreHandle_t sdMutex;
+
+// Dichiarazioni esterne (definite in main.cpp)
+extern bool initSD();
+extern bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name);
+extern void debugSDWriteResult(const char* file, bool ok, size_t written, uint32_t microsTime);
 
 // Enum locale con gli stessi valori di PrefsCmdType (definito in main.cpp)
 enum {
@@ -21,9 +28,6 @@ struct PrefsMessage {
   float fvalue;
   int   ivalue;
 };
-
-// Dichiarazione esterna (definita in main.cpp)
-extern bool saveLevelZeroToSD(float roll0, float pitch0);
 
 // Legge una volta e salva gli offset zero in NVS (tramite PrefsTask)
 void captureLevelZero() {
@@ -62,4 +66,24 @@ void captureLevelZero() {
 
   // Persisti anche su SD
   saveLevelZeroToSD(lvl_roll_zero, lvl_pitch_zero);
+}
+
+// ---------- Livella: SD persistence ----------
+bool saveLevelZeroToSD(float roll0, float pitch0) {
+  if (!initSD()) return false;
+  if (!takeMutexWarn(sdMutex, 500, "sd")) return false;
+  
+  const char* tmp = "/.tmp_level_zero.txt";
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) { xSemaphoreGive(sdMutex); return false; }
+  f.seek(0);
+  uint32_t t0 = micros();
+  int n = f.printf("%.6f,%.6f\n", roll0, pitch0);
+  f.flush();
+  f.close();
+  debugSDWriteResult("/level_zero.txt", (n > 0), n, micros() - t0);
+  SD.remove("/level_zero.txt");
+  SD.rename(tmp, "/level_zero.txt");
+  xSemaphoreGive(sdMutex);
+  return (n > 0);
 }

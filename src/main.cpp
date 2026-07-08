@@ -761,7 +761,6 @@ void LevelTask(void *param);
 bool  initLIS3DH();
 void  updateLevel();                   // lettura + calcolo roll/pitch
 void  appendLevelToJson(JsonDocument &json);
-bool saveLevelZeroToSD(float roll0, float pitch0);
 bool loadLevelZeroFromSD(float &roll0, float &pitch0);
 bool clearLevelZeroOnSD();
 
@@ -3556,26 +3555,6 @@ void appendLevelToJson(JsonDocument &json) {
   json["levelOk"]     = (fabs(lvl_roll) <= LEVEL_OK_DEG) && (fabs(lvl_pitch) <= LEVEL_OK_DEG);
   json["levelZeroR"]  = lvl_roll_zero;   // offset roll salvato
   json["levelZeroP"]  = lvl_pitch_zero;  // offset pitch salvato
-}
-
-// ---------- Livella: SD persistence ----------
-bool saveLevelZeroToSD(float roll0, float pitch0) {
-  if (!initSD()) return false;
-  if (!takeMutexWarn(sdMutex, 500, "sd")) return false;
-  
-  const char* tmp = "/.tmp_level_zero.txt";
-  File f = SD.open(tmp, FILE_WRITE);
-  if (!f) { xSemaphoreGive(sdMutex); return false; }
-  f.seek(0);
-  uint32_t t0 = micros();
-  int n = f.printf("%.6f,%.6f\n", roll0, pitch0);
-  f.flush();
-  f.close();
-  debugSDWriteResult("/level_zero.txt", (n > 0), n, micros() - t0);
-  SD.remove("/level_zero.txt");
-  SD.rename(tmp, "/level_zero.txt");
-  xSemaphoreGive(sdMutex);
-  return (n > 0);
 }
 
 bool loadLevelZeroFromSD(float &roll0, float &pitch0) {
