@@ -14,4 +14,7 @@ extern time_t nowEpoch();
 // Dichiarazione della funzione DST
 void updateDST();
 
+// Conversione UTC → locale
+time_t utcToLocal(time_t utcEpoch);
+
 #endif // TIME_MANAGER_H

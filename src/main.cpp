@@ -89,8 +89,6 @@ bool timeValid = false;
 int8_t tzOffsetHours = 1;       // UTC+1 inverno, UTC+2 estate
 bool tzIsDST = false;           // true quando è ora legale
 time_t localToUtc(time_t localEpoch);
-time_t utcToLocal(time_t utcEpoch);
-
 
 
 // =======================================================
@@ -711,12 +709,6 @@ time_t nowEpoch() {
 time_t localToUtc(time_t localEpoch) {
   return localEpoch - (tzOffsetHours * 3600);
 }
-
-// Converte epoch UTC in epoch locale (per display e grafici)
-time_t utcToLocal(time_t utcEpoch) {
-  return utcEpoch + (tzOffsetHours * 3600);
-}
-
 
 
 void LevelTask(void *param);

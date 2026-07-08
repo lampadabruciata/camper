@@ -32,6 +32,11 @@ void updateDST() {
     else if (day == octLastSun && hour < 1) dst = true;
   }
 
-  tzIsDST = dst;
+tzIsDST = dst;
   tzOffsetHours = dst ? 2 : 1;
+}
+
+// Converte epoch UTC in epoch locale (per display e grafici)
+time_t utcToLocal(time_t utcEpoch) {
+  return utcEpoch + (tzOffsetHours * 3600);
 }
