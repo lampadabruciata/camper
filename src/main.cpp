@@ -2514,37 +2514,10 @@ bool restoreAhStateFromSD()
 }
 
 
-  //============================
-  // LOOP PRINCIPALE
-  //===========================
-
-void monitorTaskStacks() {
-  static unsigned long lastStackLog = 0;
-  if (millis() - lastStackLog > 30000) { // ogni 30 secondi
-    lastStackLog = millis();
-
-    uint32_t loopWM    = uxTaskGetStackHighWaterMark(NULL);
-    uint32_t sensorWM  = SensorTask ? uxTaskGetStackHighWaterMark(SensorTask) : 0;
-    uint32_t displayWM = DisplayTaskHandle ? uxTaskGetStackHighWaterMark(DisplayTaskHandle) : 0;
-
-    Serial.printf(
-      "[STACK] loop=%u sensor=%u display=%u\n",
-      loopWM,
-      sensorWM,
-      displayWM
-    );
-  }
-}
-
-void loop() {
-
-    
-monitorTaskStacks();
-    
-    
-    
-    
-    
+// =======================================================
+// ===============  GESTIONE PULSANTE  ==================
+// =======================================================
+void handleButtonInput() {
     // --- Pulsante: debounce + 1 click per pressione completa ---
     static int lastStableState = HIGH; // INPUT_PULLUP → riposo HIGH
     static int lastRawState = HIGH;    // lettura grezza
@@ -2576,7 +2549,7 @@ monitorTaskStacks();
                 // pagina successiva
                 currentPage = (currentPage + 1) % 6;
 
-                // ✅ PATCH: NON riattivare MAI l’integrazione Ah
+                // ✅ PATCH: NON riattivare MAI l'integrazione Ah
                 // freezeAhIntegration = false;   <-- rimosso
 
                 // chiedi redraw
@@ -2590,6 +2563,41 @@ monitorTaskStacks();
             }
         }
     }
+}
+
+  //============================
+  // LOOP PRINCIPALE
+  //===========================
+
+void monitorTaskStacks() {
+  static unsigned long lastStackLog = 0;
+  if (millis() - lastStackLog > 30000) { // ogni 30 secondi
+    lastStackLog = millis();
+
+    uint32_t loopWM    = uxTaskGetStackHighWaterMark(NULL);
+    uint32_t sensorWM  = SensorTask ? uxTaskGetStackHighWaterMark(SensorTask) : 0;
+    uint32_t displayWM = DisplayTaskHandle ? uxTaskGetStackHighWaterMark(DisplayTaskHandle) : 0;
+
+    Serial.printf(
+      "[STACK] loop=%u sensor=%u display=%u\n",
+      loopWM,
+      sensorWM,
+      displayWM
+    );
+  }
+}
+
+void loop() {
+
+    
+monitorTaskStacks();
+    
+    
+    
+    
+    
+    // --- Gestione pulsante (estratta in funzione) ---
+    handleButtonInput();
 
     // --- Timeout inattività: gestito da funzione dedicata ---
     handleDisplayTimeout();
