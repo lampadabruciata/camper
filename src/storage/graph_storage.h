@@ -51,4 +51,7 @@ struct GraphHeader { uint32_t magic; uint16_t ver; uint16_t rsv; };
 // Salva i grafici su SD
 void saveGraphToSD();
 
+// Ripristina i grafici da SD
+void restoreGraphFromSD();
+
 #endif // GRAPH_STORAGE_H

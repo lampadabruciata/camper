@@ -29,6 +29,7 @@
 #include "time/time_manager.h"
 #include "web/web_manager.h"
 #include "storage/graph_storage.h"
+#include "storage/crash_logger.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -37,18 +38,7 @@ SemaphoreHandle_t prefsMutex;
 portMUX_TYPE stateMux = portMUX_INITIALIZER_UNLOCKED;
 
 void i2cRecoverBus(void);  // forward declaration per il recovery I2C
-
-// ======= PROTOTIPI MANCANTI (FIX BUILD) =======
-
-// crash log
-void logCrash(const char *reason);
-
-// task
-void DisplayTask(void *param);
-
-// grafici
-void restoreGraphFromSD();
-
+void DisplayTask(void *param);  // forward declaration
 
 #define STATE_ENTER() taskENTER_CRITICAL(&stateMux)
 #define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
@@ -460,192 +450,6 @@ float solAhHourlyYesterday[24];
 // Totali solari
 float solAhTodayTotal_global = 0.0f;
 float solAhYesterdayTotal_global = 0.0f;
-
-// =======================================================
-// ===============  CRASH LOG SU SD ======================
-// =======================================================
-#define MAX_CRASH_LOGS 20   // <-- puoi aumentare o diminuire
-
-void logCrash(const char *reason) {
-
-  static volatile bool crashLogging = false;
-  if (crashLogging) return;
-  crashLogging = true;
-
-  // ----------- TIME STRING ROBUSTO -----------
-  char clockBuf[32] = "UNKNOWN_TIME";
-
-  // ✅ 1) PROVA DIRETTA RTC (NON DIPENDE DA timeValid)
-  if (rtc.begin()) {
-    DateTime now = rtc.now();
-    if (now.year() >= 2023 && now.year() < 2100) {
-      snprintf(clockBuf, sizeof(clockBuf),
-               "%04d-%02d-%02d %02d:%02d",
-               now.year(), now.month(), now.day(),
-               now.hour(), now.minute());
-    }
-  }
-
-  // ✅ 2) FALLBACK: usa tempo derivato (se RTC non pronto)
-  if (strcmp(clockBuf, "UNKNOWN_TIME") == 0 && timeValid) {
-    snprintf(clockBuf, sizeof(clockBuf),
-             "%04d-%02d-%02d %02d:%02d",
-             currentYear, currentMonth, currentDay,
-             currentHour, currentMinute);
-  }
-
-  // ✅ 3) FALLBACK FINALE
-  if (strcmp(clockBuf, "UNKNOWN_TIME") == 0) {
-    snprintf(clockBuf, sizeof(clockBuf),
-             "NO_TIME (t=%lu ms)", millis());
-  }
-
-  // ----------- SD INIT -----------
-  if (!initSD()) {
-    crashLogging = false;
-    return;
-  }
-
-  if (sdMutex == NULL) {
-    sdMutex = xSemaphoreCreateMutex();
-    if (sdMutex == NULL) { crashLogging = false; return; }
-  }
-
-  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300)) != pdTRUE) {
-    crashLogging = false;
-    return;
-  }
-
-  // ----------- LEGGI FILE ESISTENTE -----------
-  String oldLogs = "";
-  if (SD.exists("/crashlog.txt")) {
-    File r = SD.open("/crashlog.txt", FILE_READ);
-    if (r) {
-      oldLogs = r.readString();
-      r.close();
-    }
-  }
-
-  // ----------- SPLIT EVENTI -----------
-  std::vector<String> events;
-  int idx = 0;
-  while (true) {
-    int start = oldLogs.indexOf("--- CRASH EVENT ---", idx);
-    if (start < 0) break;
-    int end = oldLogs.indexOf("--------------------", start);
-    if (end < 0) break;
-    end += strlen("--------------------");
-
-    events.push_back(oldLogs.substring(start, end));
-    idx = end;
-  }
-
-  // ✅ Mantieni ultimi N
-  while (events.size() >= MAX_CRASH_LOGS)
-    events.erase(events.begin());
-
-  // ----------- RESET REASON COMPLETO -----------
-  esp_reset_reason_t rr = esp_reset_reason();
-  const char* rrStr = "UNKNOWN";
-
-  switch (rr) {
-    case ESP_RST_POWERON:   rrStr = "POWERON"; break;
-    case ESP_RST_EXT:       rrStr = "EXT_RESET (USB/BTN)"; break;
-    case ESP_RST_SW:        rrStr = "SW_RESET"; break;
-    case ESP_RST_PANIC:     rrStr = "PANIC"; break;
-    case ESP_RST_INT_WDT:   rrStr = "INT_WDT"; break;
-    case ESP_RST_TASK_WDT:  rrStr = "TASK_WDT"; break;
-    case ESP_RST_WDT:       rrStr = "WDT"; break;
-    case ESP_RST_DEEPSLEEP: rrStr = "DEEPSLEEP_WAKE"; break;
-    case ESP_RST_BROWNOUT:  rrStr = "BROWNOUT"; break;
-    case ESP_RST_SDIO:      rrStr = "SDIO"; break;
-    default:                rrStr = "UNKNOWN"; break;
-  }
-
-  // ----------- INFO SISTEMA -----------
-  unsigned long now = millis();
-
-  float socPct = (batteryAh_max > 0.5f)
-                   ? (100.0f * batteryAh_now / batteryAh_max)
-                   : 0.0f;
-
-  float tempESP = temperatureRead();
-
-  uint32_t heap = ESP.getFreeHeap();
-
-  uint32_t psramFree = 0;
-#ifdef BOARD_HAS_PSRAM
-  psramFree = ESP.getFreePsram();
-#endif
-
-  uint32_t stackLoop = uxTaskGetStackHighWaterMark(NULL);
-  uint32_t stackSensor = SensorTask ? uxTaskGetStackHighWaterMark(SensorTask) : 0;
-  uint32_t stackDisplay = DisplayTaskHandle ? uxTaskGetStackHighWaterMark(DisplayTaskHandle) : 0;
-
-  uint8_t wifiClients = WiFi.softAPgetStationNum();
-
-  // ----------- COSTRUZIONE EVENTO -----------
-  String newEvent;
-  newEvent.reserve(1200);
-
-  newEvent += "\n--- CRASH EVENT ---\n";
-  newEvent += "Time(ms): " + String(now) + "\n";
-  newEvent += "Clock: " + String(clockBuf) + "\n";
-  newEvent += "Reason: " + String(reason) + "\n";
-  newEvent += "ResetReason: " + String(rrStr) + " (" + String((int)rr) + ")\n";
-
-  newEvent += "Page: " + String((int)currentPage) +
-              " Dim: " + String(isDimmed ? 1 : 0) +
-              " Excl: " + String(levelExclusiveMode ? 1 : 0) + "\n";
-
-  newEvent += "ADS=" + String(adsPresent) +
-              " LIS=" + String(lisPresent) +
-              " Scale1=" + String(scale1Ready) +
-              " Scale2=" + String(scale2Ready) + "\n";
-
-  newEvent += "TempInt=" + String(tempInt,1) +
-              " TempExt=" + String(tempExt,1) +
-              " TempESP=" + String(tempESP,1) + "\n";
-
-  newEvent += "V=" + String(vBattery,2) +
-              " I=" + String(currentFiltered,2) +
-              " SolA=" + String(solarAmps,2) + "\n";
-
-  newEvent += "Ah=" + String(batteryAh_now,1) +
-              "/" + String(batteryAh_max,1) +
-              " SOC=" + String((int)(socPct+0.5f)) + "%\n";
-
-  newEvent += "Gas1=" + String(gasResidual1,2) +
-              " Gas2=" + String(gasResidual2,2) + "\n";
-
-  newEvent += "Water=" + String(remainingLiters,1) +
-              " Flow=" + String(lastFlowLmin,2) + "\n";
-
-  newEvent += "Heap=" + String(heap) +
-              " PSRAM=" + String(psramFree) + "\n";
-
-  newEvent += "Stack: loop=" + String(stackLoop) +
-              " sensor=" + String(stackSensor) +
-              " display=" + String(stackDisplay) + "\n";
-
-  newEvent += "WiFiClients=" + String(wifiClients) + "\n";
-
-  newEvent += "--------------------\n";
-
-  // ----------- SALVA -----------
-  events.push_back(newEvent);
-
-  File w = SD.open("/crashlog.txt", FILE_WRITE);
-  if (w) {
-    for (auto &e : events)
-      w.print(e);
-    w.close();
-  }
-
-  xSemaphoreGive(sdMutex);
-  crashLogging = false;
-}
-
 
 // =======================================================
 // ============ PROTOTIPI CHE USEREMO DOPO ===============
@@ -2470,191 +2274,6 @@ void PrefsTask(void *param) {
     }
 }
 
-// =======================================================
-// ============ GRAFICO 24H - SAVE / RESTORE ==============
-// =======================================================
-
-void restoreGraphFromSD() {
-  Serial.println("[GRAPH] Avvio restoreGraphFromSD() (SAFE)...");
-
-  if (!initSD()) {
-    Serial.println("[GRAPH] SD non pronta");
-    return;
-  }
-
-  if (!takeMutexWarn(sdMutex, 500, "sd")) {
-    Serial.println("[GRAPH] sdMutex non disponibile");
-    return;
-  }
-
-  const char* path = "/graph24h.bin";
-
-  if (!SD.exists(path)) {
-    xSemaphoreGive(sdMutex);
-    Serial.println("[GRAPH] nessun file graph24h.bin");
-    return;
-  }
-
-  File f = SD.open(path, FILE_READ);
-  if (!f) {
-    xSemaphoreGive(sdMutex);
-    Serial.println("[GRAPH] errore apertura file");
-    return;
-  }
-
-  // ================= DIMENSIONE ATTESA =================
-  const size_t bytesPerSample =
-    (3 * sizeof(float)) + 6 + sizeof(uint32_t);
-
-  const size_t blockSamples = numSamples * bytesPerSample;
-  const size_t blockHeader  = sizeof(GraphHeader);
-  const size_t blockIndex   = sizeof(int);
-
-  const size_t blockHours =
-    sizeof(ahHourlyToday) +
-    sizeof(ahHourlyYesterday) +
-    sizeof(ahChargeHourlyToday) +
-    sizeof(ahChargeHourlyYesterday) +
-    sizeof(solAhHourlyToday) +
-    sizeof(solAhHourlyYesterday);
-
-  const size_t blockTotals =
-    sizeof(float) * 6 +
-    sizeof(int);
-
-  const size_t expectedSize =
-    blockHeader + blockSamples + blockIndex + blockHours + blockTotals;
-
-  size_t fileSize = f.size();
-  Serial.printf("[GRAPH] File size = %u, expected = %u\n",
-    (unsigned)fileSize, (unsigned)expectedSize);
-
-  if (fileSize != expectedSize) {
-    Serial.println("[GRAPH] Dimensione NON valida — restore annullato");
-    f.close();
-    xSemaphoreGive(sdMutex);
-    return;
-  }
-
-  // ================= LETTURA BUFFER =================
-  uint8_t* buf = (uint8_t*)malloc(fileSize);
-  if (!buf) {
-    Serial.println("[GRAPH] malloc fallita");
-    f.close();
-    xSemaphoreGive(sdMutex);
-    return;
-  }
-
-  size_t readBytes = f.read(buf, fileSize);
-  f.close();
-  xSemaphoreGive(sdMutex);
-
-  if (readBytes != fileSize) {
-    Serial.println("[GRAPH] lettura incompleta");
-    free(buf);
-    return;
-  }
-
-  Serial.println("[GRAPH] Lettura OK — parsing...");
-
-  uint8_t* p = buf;
-
-  // ================= HEADER =================
-  GraphHeader* hdr = (GraphHeader*)p;
-  if (hdr->magic != GRAPH_MAGIC || hdr->ver < 1) {
-    Serial.println("[GRAPH] Header non valido");
-    free(buf);
-    return;
-  }
-
-  p += sizeof(GraphHeader);
-
-  // ================= SAMPLES =================
-  for (int i = 0; i < numSamples; i++) {
-
-    if ((i % 100) == 0) {
-        vTaskDelay(1);   // ✅ nutrizione watchdog
-    }
-
-    memcpy(&voltageSamples[i], p, sizeof(float)); p += 4;
-    memcpy(&currentSamples[i], p, sizeof(float)); p += 4;
-    memcpy(&solarCurrentSamples[i], p, sizeof(float)); p += 4;
-    memcpy(timeLabels[i], p, 6);
-    timeLabels[i][5] = 0;
-    p += 6;
-  }
-
-  // ================= EPOCH =================
-  if (hdr->ver >= 3) {
-    for (int i = 0; i < numSamples; i++) {
-        if ((i % 100) == 0) {
-            vTaskDelay(1);   // ✅ nutrizione watchdog
-        }
-        memcpy(&epochMinutes[i], p, sizeof(uint32_t));
-        p += sizeof(uint32_t);
-    }
-
-  } else {
-    for (int i = 0; i < numSamples; i++)
-      epochMinutes[i] = 0;
-  }
-
-  // ================= INDEX =================
-  memcpy(&sampleIndex, p, sizeof(int));
-  p += sizeof(int);
-
-  // ================= DATI ORARI =================
-  if (hdr->ver >= 2) {
-    memcpy(ahHourlyToday, p, sizeof(ahHourlyToday)); p += sizeof(ahHourlyToday);
-    memcpy(ahHourlyYesterday, p, sizeof(ahHourlyYesterday)); p += sizeof(ahHourlyYesterday);
-    memcpy(ahChargeHourlyToday, p, sizeof(ahChargeHourlyToday)); p += sizeof(ahChargeHourlyToday);
-    memcpy(ahChargeHourlyYesterday, p, sizeof(ahChargeHourlyYesterday)); p += sizeof(ahChargeHourlyYesterday);
-    memcpy(solAhHourlyToday, p, sizeof(solAhHourlyToday)); p += sizeof(solAhHourlyToday);
-    memcpy(solAhHourlyYesterday, p, sizeof(solAhHourlyYesterday)); p += sizeof(solAhHourlyYesterday);
-
-    memcpy(&ahTodayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&ahYesterdayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&ahChargeTodayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&ahChargeYesterdayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&solAhTodayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&solAhYesterdayTotal_global, p, sizeof(float)); p += 4;
-    memcpy(&currentHour, p, sizeof(int)); p += 4;
-  }
-
-  free(buf);
-
-  // ================= ✅ PULIZIA DATI VECCHI =================
-  if (timeValid) {
-    time_t nowMin = nowEpoch() / 60;
-
-    int removed = 0;
-
-    for (int i = 0; i < numSamples; i++) {
-      uint32_t ep = epochMinutes[i];
-
-      if (ep == 0) continue;
-
-      if (ep < (nowMin - 1440)) {
-        epochMinutes[i] = 0;
-        voltageSamples[i] = 0;
-        currentSamples[i] = 0;
-        solarCurrentSamples[i] = 0;
-        strcpy(timeLabels[i], "--:--");
-        removed++;
-      }
-    }
-
-    Serial.printf("[GRAPH] Pulizia completata, rimossi %d punti vecchi\n", removed);
-  } else {
-    Serial.println("[GRAPH] timeValid=false → skip pulizia");
-  }
-
-  Serial.printf("[GRAPH] Restore COMPLETATO. sampleIndex=%d\n", sampleIndex);
-
-  graphRestored = true;
-}
-
-
 // --- Task: ripristino storico posticipato ---
 void LateRestoreTask(void *param) {
   Serial.println(">>> LateRestoreTask avviato <<<");
@@ -2878,12 +2497,7 @@ bool restoreAhStateFromSD()
   // LOOP PRINCIPALE
   //===========================
 
-void loop() {
-
-
-
-    
-// ================= STACK WATERMARK MONITOR =================
+void monitorTaskStacks() {
   static unsigned long lastStackLog = 0;
   if (millis() - lastStackLog > 30000) { // ogni 30 secondi
     lastStackLog = millis();
@@ -2899,6 +2513,12 @@ void loop() {
       displayWM
     );
   }
+}
+
+void loop() {
+
+    
+monitorTaskStacks();
     
     
     
