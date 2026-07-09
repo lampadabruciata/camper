@@ -27,6 +27,7 @@
 #include "water/water_manager.h"
 #include "level/level_manager.h"
 #include "time/time_manager.h"
+#include "web/web_manager.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -1210,25 +1211,6 @@ void appendAhToJson(JsonDocument &json) {
 // ====================  WEB SERVER  =====================
 // =======================================================
 
-void sendFile(const char* path, const char* mime) {
-  if (!SPIFFS.exists(path)) {
-    server.send(404, "text/plain", "file non trovato");
-    return;
-  }
-
-  File f = SPIFFS.open(path, "r");
-  if (!f) {
-    server.send(500, "text/plain", "errore apertura file");
-    return;
-  }
-
-  // caching: il browser non richiede 100 volte chart.min.js
-  server.sendHeader("Cache-Control", "public, max-age=3600");
-
-  server.streamFile(f, mime);
-  f.close();
-}
-
 void handleIndex() {
   sendFile("/index.html", "text/html");
 }
@@ -1522,39 +1504,7 @@ void handleDataSolar() {
 }
 
 
-void handleDataWater() {
-    DynamicJsonDocument json(3000);
-
-    json["flowLmin"]       = lastFlowLmin;
-    json["totalLiters"]    = totalLitersConsumed;
-    json["remainingLiters"]= remainingLiters;
-    json["capacity"]       = tankCapacity;
-
-    json["pct"] = (tankCapacity > 0 ?
-                   100.0f * remainingLiters / tankCapacity : 0);
-
-    String out;
-    serializeJson(json, out);
-    server.send(200, "application/json", out);
-}
-
-
-void handleDataGas() {
-    DynamicJsonDocument json(3000);
-
-    json["gas1"] = gasResidual1;
-    json["gas2"] = gasResidual2;
-
-    json["pct1"] = (GAS_MAX_1 > 0 ? 100.0f * gasResidual1 / GAS_MAX_1 : 0);
-    json["pct2"] = (GAS_MAX_2 > 0 ? 100.0f * gasResidual2 / GAS_MAX_2 : 0);
-
-    String out;
-    serializeJson(json, out);
-    server.send(200, "application/json", out);
-}
-
 void handleDataAh24h() {
-
     DynamicJsonDocument json(4096);
 
     JsonArray dis = json.createNestedArray("discharge");
