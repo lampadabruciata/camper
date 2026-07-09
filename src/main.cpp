@@ -2569,6 +2569,21 @@ void handleButtonInput() {
   // LOOP PRINCIPALE
   //===========================
 
+// =======================================================
+// ===============  WEB SERVER + DNS SERVICE  ==============
+// =======================================================
+void serviceWebRequests() {
+    // Web server + DNS captive portal
+    server.handleClient();
+    static unsigned long lastDns = 0;
+    if (millis() - lastDns > 50) {   // max 20 Hz
+      dnsServer.processNextRequest();
+      lastDns = millis();
+    }
+
+    lastWebActivity = millis();   // ✅ segna attività web
+}
+
 void monitorTaskStacks() {
   static unsigned long lastStackLog = 0;
   if (millis() - lastStackLog > 30000) { // ogni 30 secondi
@@ -2635,14 +2650,7 @@ monitorTaskStacks();
     }
 
     // Web server + DNS captive portal
-    server.handleClient();
-    static unsigned long lastDns = 0;
-    if (millis() - lastDns > 50) {   // max 20 Hz
-      dnsServer.processNextRequest();
-      lastDns = millis();
-    }
-
-    lastWebActivity = millis();   // ✅ segna attività web
+    serviceWebRequests();
 }
 
 bool initLIS3DH() {
