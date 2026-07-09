@@ -12,4 +12,17 @@ void handleDataWater();
 // Handler dati gas
 void handleDataGas();
 
+// Handler dati live
+void handleDataLive();
+
+// Handler dati Ah 24h
+void handleDataAh24h();
+
+// Handler dati Ah live
+void handleDataAhLive();
+
+// Handler pagine web statiche
+void handleIndex();
+void handleChartJs();
+
 #endif // WEB_MANAGER_H

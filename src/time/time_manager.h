@@ -21,4 +21,7 @@ time_t localToUtc(time_t localEpoch);
 
 // Ottieni epoch corrente
 time_t nowEpoch();
+
+// Handler per impostazione orario via web
+void handleSetTime();
 #endif // TIME_MANAGER_H

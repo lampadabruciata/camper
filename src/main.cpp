@@ -735,11 +735,8 @@ float loadGasFromSD(const char* filename);
 
 
 // Web
-void  handleIndex();
-void  handleChartJs();
 void  LateRestoreTask(void *param);
 void  SDWatchdogTask(void *param);
-void  handleSetTime();
 void  handleManualGas1();
 void  handleManualGas2();
 //void  handleData();
@@ -1211,93 +1208,6 @@ void appendAhToJson(JsonDocument &json) {
 // ====================  WEB SERVER  =====================
 // =======================================================
 
-void handleIndex() {
-  sendFile("/index.html", "text/html");
-}
-
-void handleChartJs() {
-  sendFile("/chart.min.js", "application/javascript");
-}
-
-// Impostazione orario (HH:MM) via query: /setTime?time=12:34 e DATA
-void handleSetTime() {
-  if (!server.hasArg("time")) {
-    server.send(400, "text/plain", "errore");
-    return;
-  }
-
-  String t = server.arg("time");
-
-  // FORMAT: YYYY-MM-DD HH:MM
-  if (t.length() == 16 &&
-      t.charAt(4) == '-' &&
-      t.charAt(7) == '-' &&
-      t.charAt(10) == ' ') {
-
-    // ✅ 1) PARSING (QUESTO RESTA IDENTICO)
-    currentYear   = t.substring(0, 4).toInt();
-    currentMonth  = t.substring(5, 7).toInt();
-    currentDay    = t.substring(8, 10).toInt();
-    currentHour   = t.substring(11, 13).toInt();
-    currentMinute = t.substring(14, 16).toInt();
-
-    // ✅ 2) COSTRUISCI EPOCH DAI VALORI GIÀ PARSATI
-    tmElements_t tm;
-    tm.Year   = currentYear - 1970;
-    tm.Month  = currentMonth;
-    tm.Day    = currentDay;
-    tm.Hour   = currentHour;
-    tm.Minute = currentMinute;
-    tm.Second = 0;
-
-    // Il telefono manda ORA LOCALE (es. 14:30 a Bergamo)
-    // makeTime() produce un epoch come se fosse UTC
-    // Quindi dobbiamo sottrarre il fuso orario per ottenere il vero UTC
-    time_t localEpoch = makeTime(tm);
-
-    // Prima impostazione: calcola DST dal tempo locale
-    // (serve per sapere se è UTC+1 o UTC+2)
-    // Usiamo il mese/giorno/ora già parsati per decidere
-    bool dstEstimate = false;
-    if (currentMonth > 3 && currentMonth < 10) {
-      dstEstimate = true;
-    } else if (currentMonth == 3 && currentDay >= 25) {
-      dstEstimate = true;  // approssimazione: dopo il 25 marzo probabile DST
-    } else if (currentMonth == 10 && currentDay < 25) {
-      dstEstimate = true;  // approssimazione: prima del 25 ottobre probabile DST
-    }
-    tzIsDST = dstEstimate;
-    tzOffsetHours = dstEstimate ? 2 : 1;
-
-    time_t epoch = localEpoch - (tzOffsetHours * 3600);
-
-    // ✅ 3) ALLINEA RTC + TEMPO BASE (in UTC)
-    rtc.adjust(DateTime(epoch));
-    rtcBaseEpoch  = epoch;
-    rtcBaseMillis = millis();
-    timeValid     = true;
-
-    Serial.printf("[RTC] Allineato da telefono: locale=%02d:%02d UTC+%d epoch=%lu\n",
-                  currentHour, currentMinute, tzOffsetHours, (unsigned long)epoch);
-
-
-    // ✅ 4) RISPOSTA AL CLIENT
-    server.send(200, "text/plain", "ok");
-    return;
-  }
-
-  // FORMAT: HH:MM (fallback)
-  if (t.length() == 5 && t.charAt(2) == ':') {
-    currentHour   = t.substring(0, 2).toInt();
-    currentMinute = t.substring(3, 5).toInt();
-
-    server.send(200, "text/plain", "ok");
-    return;
-  }
-
-  server.send(400, "text/plain", "formato non valido");
-}
-
 // --- Bombola 1 ---
 void handleManualGas1() {
   if (!server.hasArg("kg")) {
@@ -1352,29 +1262,6 @@ if (scaleSafeGetUnits(scale2, 10, startReading2)) {
   server.send(200, "text/plain", "ok");
 }
 
-
-
-void handleDataLive() {
-    DynamicJsonDocument json(3000);
-
-    json["vBattery"] = vBattery;
-    json["amps"] = currentFiltered;
-    json["socPct"] = (batteryAh_max > 0 ? 100.0f * batteryAh_now / batteryAh_max : 0);
-    json["tempInt"] = tempInt;
-    json["tempExt"] = tempExt;
-    json["humInt"]  = humInt;
-    json["humExt"]  = humExt;
-
-    // Ora
-    char buf[6];
-    snprintf(buf, 6, "%02d:%02d", currentHour, currentMinute);
-    json["time"] = buf;
-    json["eff"] = chargeEfficiency;
-    
-    String out;
-    serializeJson(json, out);
-    server.send(200, "application/json", out);
-}
 
 
 void handleDataBattery() {
@@ -1504,57 +1391,7 @@ void handleDataSolar() {
 }
 
 
-void handleDataAh24h() {
-    DynamicJsonDocument json(4096);
-
-    JsonArray dis = json.createNestedArray("discharge");
-    JsonArray chg = json.createNestedArray("charge");
-    JsonArray labels = json.createNestedArray("labels");
-
-    for (int i = 0; i < 24; i++) {
-
-        dis.add(ahHourlyToday[i]);
-        chg.add(ahChargeHourlyToday[i]);
-
-        char buf[4];
-        snprintf(buf, sizeof(buf), "%02d", i);
-        labels.add(buf);
-    }
-
-    String out;
-    serializeJson(json, out);
-
-    server.send(200, "application/json", out);
-}
-
-
-void handleDataAhLive() {
-
-    DynamicJsonDocument json(4096);
-
-    JsonArray dis = json.createNestedArray("discharge");
-    JsonArray chg = json.createNestedArray("charge");
-    JsonArray labels = json.createNestedArray("labels");
-
-    int idx = minuteIndex;
-
-    for (int i = 0; i < 60; i++) {
-
-        int j = (idx + i) % 60;
-
-        dis.add(ahMinuteDischarge[j]);
-        chg.add(ahMinuteCharge[j]);
-
-        char buf[6];
-        snprintf(buf, sizeof(buf), "-%d", 59 - i);
-        labels.add(buf);
-    }
-
-    String out;
-    serializeJson(json, out);
-
-    server.send(200, "application/json", out);
-}
+// handleDataAh24h() e handleDataAhLive() spostate in web_manager.cpp
 
 
 // =======================================================
