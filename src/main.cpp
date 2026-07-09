@@ -559,6 +559,27 @@ void readTempLiveMinimal() {
 
 }
 
+// =======================================================
+// =============== DISPLAY TIMEOUT HANDLER ================
+// =======================================================
+void handleDisplayTimeout() {
+    // --- Timeout inattività: UNA SOLA transizione a pagina 0 con luce bassa ---
+    if (!isDimmed && millis() >= nextDimAt) {
+        isDimmed = true;
+        desiredContrast = BRIGHT_LOW;
+
+        displayDirty = true;
+
+        if (currentPage != 0) {
+            currentPage = 0;
+            if (DisplayTaskHandle) xTaskNotifyGive(DisplayTaskHandle);
+        } else {
+            // Forza refresh anche se già in pagina 0, per applicare il contrasto
+            if (DisplayTaskHandle) xTaskNotifyGive(DisplayTaskHandle);
+        }
+    }
+}
+
 
 // Interrupt flussometro (deve stare prima di setup)
 void IRAM_ATTR pulseCounter();
@@ -2570,21 +2591,8 @@ monitorTaskStacks();
         }
     }
 
-    // --- Timeout inattività: UNA SOLA transizione a pagina 0 con luce bassa ---
-    if (!isDimmed && millis() >= nextDimAt) {
-        isDimmed = true;
-        desiredContrast = BRIGHT_LOW;
-
-        displayDirty = true;
-
-        if (currentPage != 0) {
-            currentPage = 0;
-            if (DisplayTaskHandle) xTaskNotifyGive(DisplayTaskHandle);
-        } else {
-            // Forza refresh anche se già in pagina 0, per applicare il contrasto
-            if (DisplayTaskHandle) xTaskNotifyGive(DisplayTaskHandle);
-        }
-    }
+    // --- Timeout inattività: gestito da funzione dedicata ---
+    handleDisplayTimeout();
 
     // ------------------------------------------------------------------
     // HEARTBEAT DI SISTEMA (1 Hz) - leggerissimo, non blocca l’ESP32
