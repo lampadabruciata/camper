@@ -37,6 +37,23 @@ extern int minuteIndex;
 extern float ahMinuteDischarge[60];
 extern float ahMinuteCharge[60];
 
+// Variabili esterne per handleDataSolar (definite in main.cpp)
+extern volatile unsigned long lastWebActivity;
+extern int sampleIndex;
+extern uint32_t epochMinutes[];
+extern float solarCurrentSamples[];
+extern char timeLabels[][6];
+extern volatile float solarAmps;
+extern volatile float solarWatts;
+extern volatile float solarAhToday;
+
+// Variabili esterne per handleDataBattery (definite in main.cpp)
+extern float voltageSamples[];
+extern float currentSamples[];
+
+// Funzione esterna per ora corrente
+time_t nowEpoch();
+
 void sendFile(const char* path, const char* mime) {
   if (!SPIFFS.exists(path)) {
     server.send(404, "text/plain", "file non trovato");
@@ -162,6 +179,130 @@ void handleDataAhLive() {
 
     server.send(200, "application/json", out);
 }
+
+void handleDataSolar() {
+    lastWebActivity = millis();
+
+    const int N = 360;  // valore di default
+    const int total = 1440;  // numSamples
+    const int start = (sampleIndex - N + total) % total;
+
+    Serial.printf("[MEM] solar JSON: %u\n", ESP.getFreeHeap());
+
+    DynamicJsonDocument json(8000);
+
+    JsonArray solarA = json.createNestedArray("solarA");
+    JsonArray labels = json.createNestedArray("labels");
+    JsonArray epoch  = json.createNestedArray("epoch");
+
+    time_t nowMin = nowEpoch() / 60;
+
+    int validCount = 0;
+    const int MAX_WEB_POINTS = 300;
+
+    for (int k = 0; k < N && validCount < MAX_WEB_POINTS; k++) {
+        int idx = (start + k) % total;
+
+        uint32_t ep = epochMinutes[idx];
+
+        if (ep == 0 || ep < (nowMin - 1440)) continue;
+
+        solarA.add(solarCurrentSamples[idx]);
+        labels.add(timeLabels[idx]);
+        epoch.add(ep);
+
+        validCount++;
+    }
+
+    json["solarNow"] = solarAmps;
+    json["solarW"] = solarWatts;
+    json["vBattery"] = vBattery;
+    json["solAhToday"] = solarAhToday;
+    json["solarAhToday"] = solarAhToday;
+
+
+    String out;
+    serializeJson(json, out);
+    server.send(200, "application/json", out);
+}
+
+void handleDataBattery() {
+    lastWebActivity = millis(); // ✅ segna attività web
+
+    Serial.printf("[MEM] before JSON: %u\n", ESP.getFreeHeap());
+
+    Serial.println(">>> JSON BUILD START <<<");
+
+    const int N = 360;
+    int step = 1;
+    if (N > 300) {
+        step = (N + 300 - 1) / 300;
+    }
+
+    DynamicJsonDocument json(16000);
+
+    JsonArray volt = json.createNestedArray("volt");
+    JsonArray amps = json.createNestedArray("amps");
+    JsonArray sol  = json.createNestedArray("solar");
+    JsonArray labels = json.createNestedArray("labels");
+    JsonArray epoch  = json.createNestedArray("epoch");
+
+    const int total = 1440;  // numSamples
+    const int start = (sampleIndex - N + total) % total;
+
+    time_t nowMin = nowEpoch() / 60;
+
+    int validCount = 0;
+
+    for (int k = 0; k < N && validCount < 300; k += step) {
+        
+        
+        if ((k % 20) == 0) {
+            vTaskDelay(1);
+        }
+
+        int idx = (start + k) % total;
+
+        uint32_t ep = epochMinutes[idx];
+
+        if (ep == 0) {
+            volt.add(0);
+            amps.add(0);
+            sol.add(0);
+            labels.add("--:--");
+            epoch.add(0);
+            validCount++;
+            continue;
+        }
+
+        if (ep < (nowMin - 1440)) continue;
+
+        volt.add(voltageSamples[idx]);
+        amps.add(currentSamples[idx]);
+        sol.add(solarCurrentSamples[idx]);
+
+        labels.add(timeLabels[idx]);
+        epoch.add(ep);
+
+        validCount++;
+    }
+
+    json["vBattery"] = vBattery;
+    json["ampNow"] = currentFiltered;
+    json["solarNow"] = solarAmps;
+    json["socPct"] = (batteryAh_max > 0 ? 100.0f * batteryAh_now / batteryAh_max : 0);
+    json["ahNow"] = batteryAh_now;
+    json["ahMax"] = batteryAh_max;
+    json["eff"] = chargeEfficiency;
+
+    String out;
+    serializeJson(json, out);
+
+    Serial.println(">>> JSON BUILD DONE <<<");
+    
+    server.send(200, "application/json", out);
+}
+
 
 void handleIndex() {
     sendFile("/index.html", "text/html");

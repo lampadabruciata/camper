@@ -28,6 +28,7 @@
 #include "level/level_manager.h"
 #include "time/time_manager.h"
 #include "web/web_manager.h"
+#include "storage/graph_storage.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -46,7 +47,6 @@ void logCrash(const char *reason);
 void DisplayTask(void *param);
 
 // grafici
-void saveGraphToSD();
 void restoreGraphFromSD();
 
 
@@ -1264,135 +1264,8 @@ if (scaleSafeGetUnits(scale2, 10, startReading2)) {
 
 
 
-void handleDataBattery() {
-  lastWebActivity = millis(); // ✅ segna attività web
-
-  Serial.printf("[MEM] before JSON: %u\n", ESP.getFreeHeap());
-
-  Serial.println(">>> JSON BUILD START <<<");
-
-  const int N = reqNOrDefault(360, 60, numSamples);
-
-  static const int MAX_WEB_POINTS = 300;
-  int step = 1;
-  if (N > MAX_WEB_POINTS) {
-    step = (N + MAX_WEB_POINTS - 1) / MAX_WEB_POINTS;
-  }
-
-  DynamicJsonDocument json(16000);
-
-  JsonArray volt = json.createNestedArray("volt");
-  JsonArray amps = json.createNestedArray("amps");
-  JsonArray sol  = json.createNestedArray("solar");
-  JsonArray labels = json.createNestedArray("labels");
-  JsonArray epoch  = json.createNestedArray("epoch");
-
-  const int total = numSamples;
-  const int start = (sampleIndex - N + total) % total;
-
-  time_t nowMin = nowEpoch() / 60;
-
-  int validCount = 0;
-
-  for (int k = 0; k < N && validCount < MAX_WEB_POINTS; k += step) {
-    
-    
-    if ((k % 20) == 0) {
-            vTaskDelay(1);
-        }
-
-    int idx = (start + k) % total;
-
-    uint32_t ep = epochMinutes[idx];
-
-    if (ep == 0) {
-        volt.add(0);
-        amps.add(0);
-        sol.add(0);
-        labels.add("--:--");
-        epoch.add(0);
-        validCount++;
-        continue;
-    }
-
-    if (ep < (nowMin - 1440)) continue;
-
-    volt.add(voltageSamples[idx]);
-    amps.add(currentSamples[idx]);
-    sol.add(solarCurrentSamples[idx]);
-
-    labels.add(timeLabels[idx]);
-    epoch.add(ep);
-
-    validCount++;
-  }
-
-  json["vBattery"] = vBattery;
-  json["ampNow"] = currentFiltered;
-  json["solarNow"] = solarAmps;
-  json["socPct"] = (batteryAh_max > 0 ? 100.0f * batteryAh_now / batteryAh_max : 0);
-  json["ahNow"] = batteryAh_now;
-  json["ahMax"] = batteryAh_max;
-  json["eff"] = chargeEfficiency;
-
-  String out;
-  serializeJson(json, out);
-
-  Serial.println(">>> JSON BUILD DONE <<<");
-  
-  server.send(200, "application/json", out);
-}
-
-void handleDataSolar() {
-  lastWebActivity = millis();
-
-  const int N = reqNOrDefault(360, 60, numSamples);
-
-  Serial.printf("[MEM] solar JSON: %u\n", ESP.getFreeHeap());
-
-  DynamicJsonDocument json(8000);
-
-  JsonArray solarA = json.createNestedArray("solarA");
-  JsonArray labels = json.createNestedArray("labels");
-  JsonArray epoch  = json.createNestedArray("epoch");
-
-  const int total = numSamples;
-  const int start = (sampleIndex - N + total) % total;
-
-  time_t nowMin = nowEpoch() / 60;
-
-  int validCount = 0;
-  const int MAX_WEB_POINTS = 300;
-
-  for (int k = 0; k < N && validCount < MAX_WEB_POINTS; k++) {
-    int idx = (start + k) % total;
-
-    uint32_t ep = epochMinutes[idx];
-
-    if (ep == 0 || ep < (nowMin - 1440)) continue;
-
-    solarA.add(solarCurrentSamples[idx]);
-    labels.add(timeLabels[idx]);
-    epoch.add(ep);
-
-    validCount++;
-  }
-
-  json["solarNow"] = solarAmps;
-  json["solarW"] = solarWatts;
-  json["vBattery"] = vBattery;
-  json["solAhToday"] = solarAhToday;
-  json["solarAhToday"] = solarAhToday;
-
-
-  String out;
-  serializeJson(json, out);
-  server.send(200, "application/json", out);
-}
-
-
 // handleDataAh24h() e handleDataAhLive() spostate in web_manager.cpp
-
+// handleDataSolar() e handleDataBattery() spostate in web_manager.cpp
 
 // =======================================================
 // ========================= SETUP ========================
@@ -2600,84 +2473,6 @@ void PrefsTask(void *param) {
 // =======================================================
 // ============ GRAFICO 24H - SAVE / RESTORE ==============
 // =======================================================
-
-// --- Header per file grafico (retro-compatibile) ---
-struct GraphHeader { uint32_t magic; uint16_t ver; uint16_t rsv; };
-#define GRAPH_MAGIC 0x47524648u /* 'GRFH' */
-#define GRAPH_VER   3
-
-void saveGraphToSD() {
-
-  if (!initSD()) return;
-  if (!takeMutexWarn(sdMutex, 500, "sd")) return;
-
-  Serial.println("[GRAPH] saveGraphToSD chiamato");
-
-  SD.remove("/.tmp_graph.bin");
-
-  File f = SD.open("/.tmp_graph.bin", FILE_WRITE);
-
-  if (!f) {
-    Serial.println("[GRAPH] ERRORE apertura file!");
-    xSemaphoreGive(sdMutex);
-    return;
-  }
-
-  f.seek(0);
-
-  // ================= SCRITTURA =================
-
-  GraphHeader h{GRAPH_MAGIC, GRAPH_VER, 0};
-  f.write((uint8_t*)&h, sizeof(h));
-
-  for (int i = 0; i < numSamples; i++) {
-    f.write((uint8_t*)&voltageSamples[i], sizeof(float));
-    f.write((uint8_t*)&currentSamples[i], sizeof(float));
-    f.write((uint8_t*)&solarCurrentSamples[i], sizeof(float));
-    f.write((uint8_t*)timeLabels[i], 6);
-  }
-
-  for (int i = 0; i < numSamples; i++) {
-    f.write((uint8_t*)&epochMinutes[i], sizeof(uint32_t));
-  }
-
-  f.write((uint8_t*)&sampleIndex, sizeof(int));
-
-  f.write((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
-  f.write((uint8_t*)ahHourlyYesterday, sizeof(ahHourlyYesterday));
-  f.write((uint8_t*)ahChargeHourlyToday, sizeof(ahChargeHourlyToday));
-  f.write((uint8_t*)ahChargeHourlyYesterday, sizeof(ahChargeHourlyYesterday));
-  f.write((uint8_t*)solAhHourlyToday, sizeof(solAhHourlyToday));
-  f.write((uint8_t*)solAhHourlyYesterday, sizeof(solAhHourlyYesterday));
-
-  f.write((uint8_t*)&ahTodayTotal_global, sizeof(float));
-  f.write((uint8_t*)&ahYesterdayTotal_global, sizeof(float));
-  f.write((uint8_t*)&ahChargeTodayTotal_global, sizeof(float));
-  f.write((uint8_t*)&ahChargeYesterdayTotal_global, sizeof(float));
-  f.write((uint8_t*)&solAhTodayTotal_global, sizeof(float));
-  f.write((uint8_t*)&solAhYesterdayTotal_global, sizeof(float));
-  f.write((uint8_t*)&currentHour, sizeof(int));
-
-  // ================= FINE SCRITTURA =================
-
-  f.flush();
-
-  Serial.printf("[GRAPH] dimensione file: %u bytes\n", f.size());
-
-  f.close();
-
-  Serial.println("[GRAPH] scrittura completata");
-
-  SD.remove("/graph24h.bin");
-  
-  if (!SD.rename("/.tmp_graph.bin", "/graph24h.bin")) {
-    Serial.println("[GRAPH] ERRORE rename file!");
-  } else {
-    Serial.println("[GRAPH] file scritto e rinominato OK");
-  }
-
-  xSemaphoreGive(sdMutex);
-}
 
 void restoreGraphFromSD() {
   Serial.println("[GRAPH] Avvio restoreGraphFromSD() (SAFE)...");

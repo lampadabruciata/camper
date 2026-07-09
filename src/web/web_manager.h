@@ -21,6 +21,12 @@ void handleDataAh24h();
 // Handler dati Ah live
 void handleDataAhLive();
 
+// Handler dati solare
+void handleDataSolar();
+
+// Handler dati batteria (grafico 24h)
+void handleDataBattery();
+
 // Handler pagine web statiche
 void handleIndex();
 void handleChartJs();
