@@ -685,6 +685,8 @@ function showPage(name){
 
   if (name === "batteria") {
       requestAnimationFrame(() => drawAhGauge(ahPct));
+      // Primo fetch immediato ah24h quando si apre la pagina Batteria
+      fetchAh24hData();
   }
 
 
@@ -707,6 +709,13 @@ if (name === "livello") {
     stopFastLevelPolling();
 }
 
+// Gestione polling ah24h: avvia quando si entra in Batteria, ferma quando si esce
+if (name === "batteria") {
+    // Il fetchAh24hData() è già stato chiamato sopra, il timer è avviato
+} else {
+    clearTimeout(ah24hTimer);
+    ah24hTimer = null;
+}
 
 if (name === "solare") {
   if (window.lastData) {
@@ -737,7 +746,7 @@ document.querySelectorAll("[data-solah]").forEach(b =>
 );
 
 // aggiorna subito il totale "oggi"
-const tot = window.lastData?.solarAhTodayTotal;
+const tot = window.lastData?.solAhTodayTotal;
 if (typeof tot === 'number') {
   document.getElementById("solarAhTotal").textContent = `Totale oggi: ${tot.toFixed(2)} Ah`;
 }
@@ -1019,14 +1028,38 @@ function drawAhGaugeFrame(pct) {
 
 
 let fetchTimer = null;
-let fetchIntervalMs = 1000;    // base
+let fetchIntervalMs = 1000;    // base per dati live
 let backoff = 0;               // step di backoff
 let lastPayloadHash = null;
+
+// Timer separato per ah24h (60 secondi)
+let ah24hTimer = null;
+let ah24hLastFetch = 0;
 
 function hashObject(obj){
   try {
     return JSON.stringify(obj);
   } catch { return null; }
+}
+
+async function fetchAh24hData() {
+    if (document.hidden) return;
+    if (currentPage !== "batteria") return;
+
+    try {
+        const ahResp = await fetch("/data/ah24h");
+        const ahData = await ahResp.json();
+        updateAh24hData(ahData);
+    } catch (e) {
+        console.warn("fetchAh24hData error:", e);
+    }
+
+    scheduleNextAh24hFetch();
+}
+
+function scheduleNextAh24hFetch() {
+    clearTimeout(ah24hTimer);
+    ah24hTimer = setTimeout(fetchAh24hData, 60000);
 }
 
 async function fetchPageData() {
@@ -1046,11 +1079,6 @@ async function fetchPageData() {
              resp = await fetch(`/data/battery?n=${n}`);
              window.lastData = await resp.json();
              updateBatteryPage(window.lastData);
-             
-             // NUOVO: fetch Ah24h separatamente
-             const ahResp = await fetch("/data/ah24h");
-             const ahData = await ahResp.json();
-             updateAh24hData(ahData);
              break;
              }
 
@@ -1175,7 +1203,7 @@ function updateSolarPage(d){
 
   // Ah prodotti oggi (alias compatibili)
   const solAhTodayVal = (
-    (typeof d.solarAhTodayTotal === 'number' && d.solarAhTodayTotal) ||
+    (typeof d.solAhTodayTotal === 'number' && d.solAhTodayTotal) ||
     (typeof d.solAhToday         === 'number' && d.solAhToday) ||
     (typeof d.solarAhTodayRunning=== 'number' && d.solarAhTodayRunning) ||
     0
@@ -1586,8 +1614,8 @@ function showSolarAh(day) {
     updateSolarAhBars(arr);
 
     const tot = (day === "today")
-        ? data.solarAhTodayTotal
-        : data.solarAhYesterdayTotal;
+        ? data.solAhTodayTotal
+        : data.solAhYesterdayTotal;
 
     document.getElementById("solarAhTotal").textContent =
         `Totale ${day === "today" ? "oggi" : "ieri"}: ${tot.toFixed(2)} Ah`;

@@ -1,7 +1,7 @@
 # Report di Analisi - Progetto ESP32 Camper
 
-**Data analisi:** 7 luglio 2026  
-**File principale:** `src/main.cpp` (4353 righe)  
+**Data analisi:** 10 luglio 2026  
+**File principale:** `src/main.cpp` (3168 righe)  
 **Framework:** Arduino (ESP32)
 
 ---
@@ -17,7 +17,7 @@ Il firmware è strutturato in **7 moduli logici principali** (tutto in un unico 
 | 3 | **RTC & Time Management** | RTC DS3231, gestione orario, DST europeo, conversioni epoch |
 | 4 | **Sensori Elettrici (ADS1115)** | Lettura corrente batteria, tensione, corrente solare |
 | 5 | **Sensori Ambientali** | DHT21 interno/esterno (temperatura/umidità), LIS3DH (livella) |
-| 6 | **Gestione Risorse** | Gas (HX711), Acqua (flussometro), Ah integrazione batteria |
+| 6 | **Gestione Risorse** | Gas (HX711), Acqua (flussometro), Ah integrazione batteria, Ah solare |
 | 7 | **Web Server & API** | Web server, endpoint REST, gestione richieste HTTP |
 
 ---
@@ -195,7 +195,7 @@ Il firmware è strutturato in **7 moduli logici principali** (tutto in un unico 
            │                                 │
            ▼                                 │
 ┌─────────────────────┐                      │
-│   Web Server & API    │                      │
+│   Web Server & API  │                      │
 │                     │                      │
 └──────────┬──────────┘                      │
            │                                 │
@@ -293,6 +293,62 @@ Il firmware è strutturato in **7 moduli logici principali** (tutto in un unico 
 
 5. **DisplayTask e LevelTask**: Entrambi su Core 1, competono per risorse I2C quando la livella è attiva.
 
+6. **Cambio manuale orario all'indietro (prevHour > currentHour)**: Il meccanismo `prevHour > currentHour` non distingue un vero rollover giornaliero da un cambio manuale dell'orario all'indietro (es. 14:00 → 10:00). Questo genera erroneamente un `dayRolled = true`, spostando i dati del giorno corrente in "ieri" e azzerando i valori. Nessun workaround disponibile.
+
+7. **Variabile lastHourlyDay dichiarata ma non utilizzata**: La variabile `lastHourlyDay` (riga 418) è dichiarata ma mai utilizzata. I file `/ah_day.bin` e `/ah_hours.bin` non contengono informazioni sulla data, quindi i salti temporali superiori a 24 ore non sono gestiti esplicitamente. Dopo un reboot, i dati potrebbero essere sovrascritti in modo imprevedibile.
+
+---
+
+## 8. Struttura File `/ah_day.bin` (396 byte)
+
+### Header Dati
+```cpp
+struct AhDayHeader {
+  uint16_t year;   // 2 byte
+  uint8_t  month;  // 1 byte
+  uint8_t  day;    // 1 byte
+};                 // 4 byte totali
+```
+
+### Dati Orari
+| Campo | Dimensione | Descrizione |
+|-------|------------|-------------|
+| `ahHourlyToday[24]` | 96 byte | Ah scarica per ogni ora (oggi) |
+| `ahChargeHourlyToday[24]` | 96 byte | Ah carica per ogni ora (oggi) |
+| `solAhHourlyToday[24]` | 96 byte | Ah solare per ogni ora (oggi) |
+| `solAhHourlyYesterday[24]` | 96 byte | Ah solare per ogni ora (ieri) |
+
+### Totali
+| Campo | Dimensione | Descrizione |
+|-------|------------|-------------|
+| `solAhTodayTotal_global` | 4 byte | Totale Ah solare (oggi) |
+| `solAhYesterdayTotal_global` | 4 byte | Totale Ah solare (ieri) |
+
+**Dimensione totale: 396 byte**
+
+---
+
+## 9. Funzione `restoreAhDayFromSD()`
+
+### Comportamento attuale:
+1. **Apertura file**: Apre `/ah_day.bin` in modalità lettura
+2. **Lettura header**: Legge `AhDayHeader` (year, month, day)
+3. **Confronto data**: Verifica che anno/mese/giorno corrispondano alla data corrente RTC
+4. **Scarto automatico**: Se la data non corrisponde, scarta i dati e ritorna senza modificare le variabili
+5. **Ripristino dati orari**:
+   - `ahHourlyToday[24]`
+   - `ahChargeHourlyToday[24]`
+   - `solAhHourlyToday[24]`
+   - `solAhHourlyYesterday[24]`
+6. **Ripristino totali**:
+   - `solAhTodayTotal_global`
+   - `solAhYesterdayTotal_global`
+
+### Vantaggi del sistema:
+- **Protezione contro dati obsoleti**: Non ripristina accidentalmente dati di giorni precedenti
+- **Persistenza totale**: Salva e ripristina sia i dati orari che i totali
+- **Integrità garantita**: Controlli espliciti su ogni operazione di lettura
+
 ---
 
 ## Note Aggiuntive
@@ -301,3 +357,7 @@ Il firmware è strutturato in **7 moduli logici principali** (tutto in un unico 
 - **Core affinity**: Sensori e DHT su Core 0, Display e Livella su Core 1
 - **Watchdog**: Tutti i task hanno `esp_task_wdt_add(NULL)` per prevenire lockup
 - **Memory**: Uso di `volatile` per variabili condivise, allocazione dinamica in `restoreGraphFromSD()` con `malloc()`
+
+---
+
+*Fine report*
