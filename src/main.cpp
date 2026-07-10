@@ -344,6 +344,15 @@ struct AhStateFile {
 #define AH_STATE_MAGIC 0x41485354UL
 const char *AH_STATE_FILE = "/ah_state.bin";
 
+// ===== AH DAY FILE - Header con data =====
+struct AhDayHeader {
+    uint16_t year;
+    uint8_t  month;
+    uint8_t  day;
+};
+#define AH_DAY_MAGIC 0x41484441u  // 'AHDA'
+const char *AH_DAY_FILE = "/ah_day.bin";
+
 // ===== SD DEFERRED WRITE SYSTEM =====
 volatile bool sdDeferred = false;
 volatile unsigned long lastWebActivity = 0;
@@ -1773,6 +1782,7 @@ void SensorLoop(void *pvParameters) {
             solarAhToday = 0;
             ahTodayTotal_global = 0;
             ahChargeTodayTotal_global = 0;
+            solAhYesterdayTotal_global = solAhTodayTotal_global;  // ✅ trasferisci totale ieri
             solAhTodayTotal_global = 0;
         }
 
@@ -2364,7 +2374,6 @@ void saveAhToSD() {
   if (!takeMutexWarn(sdMutex, 500, "sd"))
     return;
 
-  
   SD.remove("/ah_day.bin");
 
   File f = SD.open("/ah_day.bin", FILE_WRITE);
@@ -2375,10 +2384,22 @@ void saveAhToSD() {
 
   f.seek(0);
   
-  // ✅ salva SOLO quello che serve al frontend
+  // ✅ salva header con data
+  AhDayHeader hdr;
+  hdr.year  = currentYear;
+  hdr.month = currentMonth;
+  hdr.day   = currentDay;
+  f.write((uint8_t*)&hdr, sizeof(hdr));
+  
+  // ✅ salva array orari
   f.write((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
   f.write((uint8_t*)ahChargeHourlyToday, sizeof(ahChargeHourlyToday));
   f.write((uint8_t*)solAhHourlyToday, sizeof(solAhHourlyToday));
+  f.write((uint8_t*)solAhHourlyYesterday, sizeof(solAhHourlyYesterday));
+  
+  // ✅ salva totali
+  f.write((uint8_t*)&solAhTodayTotal_global, sizeof(solAhTodayTotal_global));
+  f.write((uint8_t*)&solAhYesterdayTotal_global, sizeof(solAhYesterdayTotal_global));
 
   f.flush();
   f.close();
@@ -2434,9 +2455,33 @@ void restoreAhDayFromSD() {
     return;
   }
 
+  // ✅ Leggi header con data
+  AhDayHeader hdr;
+  if (f.read((uint8_t*)&hdr, sizeof(hdr)) != sizeof(hdr)) {
+    f.close();
+    xSemaphoreGive(sdMutex);
+    return;
+  }
+
+  // ✅ Verifica data: se non corrisponde, scarta i dati
+  if (hdr.year != currentYear || hdr.month != currentMonth || hdr.day != currentDay) {
+    Serial.printf("[AH] Data non corrisponde (file: %04d-%02d-%02d, attuale: %04d-%02d-%02d) - scarto i dati\n",
+      hdr.year, hdr.month, hdr.day,
+      currentYear, currentMonth, currentDay);
+    f.close();
+    xSemaphoreGive(sdMutex);
+    return;
+  }
+
+  // ✅ Ripristina array orari
   f.read((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
   f.read((uint8_t*)ahChargeHourlyToday, sizeof(ahChargeHourlyToday));
   f.read((uint8_t*)solAhHourlyToday, sizeof(solAhHourlyToday));
+  f.read((uint8_t*)solAhHourlyYesterday, sizeof(solAhHourlyYesterday));
+  
+  // ✅ Ripristina totali
+  f.read((uint8_t*)&solAhTodayTotal_global, sizeof(solAhTodayTotal_global));
+  f.read((uint8_t*)&solAhYesterdayTotal_global, sizeof(solAhYesterdayTotal_global));
 
   f.close();
   xSemaphoreGive(sdMutex);

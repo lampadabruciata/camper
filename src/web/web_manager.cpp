@@ -31,6 +31,12 @@ extern float chargeEfficiency;
 // Variabili esterne per handleDataAh24h (definite in main.cpp)
 extern float ahHourlyToday[24];
 extern float ahChargeHourlyToday[24];
+extern float ahHourlyYesterday[24];
+extern float ahChargeHourlyYesterday[24];
+extern float ahTodayTotal_global;
+extern float ahYesterdayTotal_global;
+extern float ahChargeTodayTotal_global;
+extern float ahChargeYesterdayTotal_global;
 
 // Variabili esterne per handleDataAhLive (definite in main.cpp)
 extern int minuteIndex;
@@ -46,6 +52,8 @@ extern char timeLabels[][6];
 extern volatile float solarAmps;
 extern volatile float solarWatts;
 extern volatile float solarAhToday;
+extern float solAhHourlyToday[24];
+extern float solAhHourlyYesterday[24];
 
 // Variabili esterne per handleDataBattery (definite in main.cpp)
 extern float voltageSamples[];
@@ -129,25 +137,38 @@ void handleDataLive() {
 
 
 void handleDataAh24h() {
-    DynamicJsonDocument json(4096);
+    DynamicJsonDocument json(6000);
 
-    JsonArray dis = json.createNestedArray("discharge");
-    JsonArray chg = json.createNestedArray("charge");
+    // Array Ah scaricati (discharge)
+    JsonArray ahHourlyTodayArr = json.createNestedArray("ahHourlyToday");
+    JsonArray ahHourlyYesterdayArr = json.createNestedArray("ahHourlyYesterday");
+    
+    // Array Ah caricati (charge)
+    JsonArray ahChargeHourlyTodayArr = json.createNestedArray("ahChargeHourlyToday");
+    JsonArray ahChargeHourlyYesterdayArr = json.createNestedArray("ahChargeHourlyYesterday");
+    
+    // Labels ore
     JsonArray labels = json.createNestedArray("labels");
 
     for (int i = 0; i < 24; i++) {
-
-        dis.add(ahHourlyToday[i]);
-        chg.add(ahChargeHourlyToday[i]);
-
+        ahHourlyTodayArr.add(ahHourlyToday[i]);
+        ahHourlyYesterdayArr.add(ahHourlyYesterday[i]);
+        ahChargeHourlyTodayArr.add(ahChargeHourlyToday[i]);
+        ahChargeHourlyYesterdayArr.add(ahChargeHourlyYesterday[i]);
+        
         char buf[4];
         snprintf(buf, sizeof(buf), "%02d", i);
         labels.add(buf);
     }
 
+    // Totali
+    json["ahTodayTotal"] = ahTodayTotal_global;
+    json["ahYesterdayTotal"] = ahYesterdayTotal_global;
+    json["ahChargeTodayTotal"] = ahChargeTodayTotal_global;
+    json["ahChargeYesterdayTotal"] = ahChargeYesterdayTotal_global;
+
     String out;
     serializeJson(json, out);
-
     server.send(200, "application/json", out);
 }
 
@@ -220,6 +241,21 @@ void handleDataSolar() {
     json["solAhToday"] = solarAhToday;
     json["solarAhToday"] = solarAhToday;
 
+    // Totali solari giornalieri
+    extern float solAhTodayTotal_global;
+    extern float solAhYesterdayTotal_global;
+    json["solAhTodayTotal"] = solAhTodayTotal_global;
+    json["solAhYesterdayTotal"] = solAhYesterdayTotal_global;
+
+    JsonArray solAhTodayArr = json.createNestedArray("solAhHourlyToday");
+    for (int i = 0; i < 24; i++) {
+        solAhTodayArr.add(solAhHourlyToday[i]);
+    }
+
+    JsonArray solAhYesterdayArr = json.createNestedArray("solAhHourlyYesterday");
+    for (int i = 0; i < 24; i++) {
+        solAhYesterdayArr.add(solAhHourlyYesterday[i]);
+    }
 
     String out;
     serializeJson(json, out);

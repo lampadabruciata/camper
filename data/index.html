@@ -657,9 +657,17 @@ let ahToday = Array(24).fill(null);
 let ahYesterday = Array(24).fill(null);
 let currentAhDay = "today";
 
+// Totali Ah consumati (da /data/ah24h)
+let ahTodayTotal = 0;
+let ahYesterdayTotal = 0;
+
 let ahChargeToday = Array(24).fill(null);
 let ahChargeYesterday = Array(24).fill(null);
 let currentAhChargeDay = "today";
+
+// Totali Ah caricati (da /data/ah24h)
+let ahChargeTodayTotal = 0;
+let ahChargeYesterdayTotal = 0;
 
 let ahPct = 0;
 let ahPctDrawn = 0;
@@ -1030,16 +1038,21 @@ async function fetchPageData() {
         switch (currentPage) {
 
             case "batteria": {
-            const n =
-              selectedHours === 1 ? 60 :
-              selectedHours === 6 ? 360 :
-              1440;
+             const n =
+               selectedHours === 1 ? 60 :
+               selectedHours === 6 ? 360 :
+               1440;
 
-            resp = await fetch(`/data/battery?n=${n}`);
-            window.lastData = await resp.json();
-            updateBatteryPage(window.lastData);
-            break;
-            }
+             resp = await fetch(`/data/battery?n=${n}`);
+             window.lastData = await resp.json();
+             updateBatteryPage(window.lastData);
+             
+             // NUOVO: fetch Ah24h separatamente
+             const ahResp = await fetch("/data/ah24h");
+             const ahData = await ahResp.json();
+             updateAh24hData(ahData);
+             break;
+             }
 
             case "solare": {
             const n =
@@ -1121,20 +1134,30 @@ function updateBatteryPage(d){
     document.getElementById("eff").textContent =
        (typeof d.eff === 'number') ? Math.round(d.eff * 100) + "%" : "--";
 
-    // Serie orarie per gli istogrammi (oggi/ieri)
+    // NOTA: I dati Ah orari vengono letti da /data/ah24h via updateAh24hData()
+
+    ahPct = d.socPct;
+    drawAhGauge(ahPct);
+}
+
+// Aggiorna i dati Ah orari dall'endpoint /data/ah24h
+function updateAh24hData(d) {
     ahToday           = normalizeHourlyArray(d.ahHourlyToday);
     ahYesterday       = normalizeHourlyArray(d.ahHourlyYesterday);
     ahChargeToday     = normalizeHourlyArray(d.ahChargeHourlyToday);
     ahChargeYesterday = normalizeHourlyArray(d.ahChargeHourlyYesterday);
-
+    
+    // Salva i totali per showAhDay/showAhChargeDay
+    ahTodayTotal     = d.ahTodayTotal     ?? 0;
+    ahYesterdayTotal = d.ahYesterdayTotal ?? 0;
+    ahChargeTodayTotal = d.ahChargeTodayTotal ?? 0;
+    ahChargeYesterdayTotal = d.ahChargeYesterdayTotal ?? 0;
+    
     // (Ri)disegna i due istogrammi con il giorno selezionato
     ensureAhHourlyChart();
     ensureAhChargeHourlyChart();
     showAhDay(localStorage.getItem("ahDay") || "today");
     showAhChargeDay(localStorage.getItem("ahChargeDay") || "today");
-
-    ahPct = d.socPct;
-    drawAhGauge(ahPct);
 }
 
 
@@ -1472,10 +1495,8 @@ function showAhDay(day) {
   ahHourlyChart.data.datasets[0].data = series;
   ahHourlyChart.update();
 
-  // Aggiorna totale Ah consumati
-  const total = (day === "today")
-      ? (window.lastData?.ahTodayTotal ?? 0)
-      : (window.lastData?.ahYesterdayTotal ?? 0);
+  // Aggiorna totale Ah consumati (dalla variabile globale ahTodayTotal/ahYesterdayTotal)
+  const total = (day === "today") ? ahTodayTotal : ahYesterdayTotal;
 
   document.getElementById("ahConsumedTotal").textContent =
       `Totale ${day === "today" ? "oggi" : "ieri"}: ${total.toFixed(2)} Ah`;
@@ -1590,10 +1611,8 @@ function showAhChargeDay(day) {
   ahChargeHourlyChart.data.datasets[0].data = series;
   ahChargeHourlyChart.update();
 
-  // Aggiorna totale Ah caricati
-  const total = (day === "today")
-      ? (window.lastData?.ahChargeTodayTotal ?? 0)
-      : (window.lastData?.ahChargeYesterdayTotal ?? 0);
+  // Aggiorna totale Ah caricati (dalla variabile globale)
+  const total = (day === "today") ? ahChargeTodayTotal : ahChargeYesterdayTotal;
 
   document.getElementById("ahChargeTotal").textContent =
       `Totale ${day === "today" ? "oggi" : "ieri"}: ${total.toFixed(2)} Ah`;
