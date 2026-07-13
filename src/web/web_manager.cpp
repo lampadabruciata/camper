@@ -331,6 +331,33 @@ void handleDataBattery() {
     json["ahMax"] = batteryAh_max;
     json["eff"] = chargeEfficiency;
 
+    // ===== AGGIUNGI DATI AH ORARI E TOTALI (stesso modello di handleDataSolar) =====
+    JsonArray ahHourlyTodayArr = json.createNestedArray("ahHourlyToday");
+    for (int i = 0; i < 24; i++) {
+        ahHourlyTodayArr.add(ahHourlyToday[i]);
+    }
+
+    JsonArray ahHourlyYesterdayArr = json.createNestedArray("ahHourlyYesterday");
+    for (int i = 0; i < 24; i++) {
+        ahHourlyYesterdayArr.add(ahHourlyYesterday[i]);
+    }
+
+    JsonArray ahChargeHourlyTodayArr = json.createNestedArray("ahChargeHourlyToday");
+    for (int i = 0; i < 24; i++) {
+        ahChargeHourlyTodayArr.add(ahChargeHourlyToday[i]);
+    }
+
+    JsonArray ahChargeHourlyYesterdayArr = json.createNestedArray("ahChargeHourlyYesterday");
+    for (int i = 0; i < 24; i++) {
+        ahChargeHourlyYesterdayArr.add(ahChargeHourlyYesterday[i]);
+    }
+
+    // Totali Ah
+    json["ahTodayTotal"] = ahTodayTotal_global;
+    json["ahYesterdayTotal"] = ahYesterdayTotal_global;
+    json["ahChargeTodayTotal"] = ahChargeTodayTotal_global;
+    json["ahChargeYesterdayTotal"] = ahChargeYesterdayTotal_global;
+
     String out;
     serializeJson(json, out);
 

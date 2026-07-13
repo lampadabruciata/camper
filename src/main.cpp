@@ -43,6 +43,9 @@ void DisplayTask(void *param);  // forward declaration
 #define STATE_ENTER() taskENTER_CRITICAL(&stateMux)
 #define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
 
+// === CONFIGURAZIONE TASK DHT (per test diagnostico watchdog) ===
+#define ENABLE_DHT_TASK false  // DISABILITATO: verifica se gli INT_WDT spariscono
+
 // ==== QUEUE PER SCRITTURE NVS (Preferences) ====
 QueueHandle_t prefsQueue;
 
@@ -424,7 +427,7 @@ volatile bool forceGasSave2 = false;
 
 float ahHourlyToday[24];
 float ahHourlyYesterday[24];
-int lastHourlyDay = -1;
+time_t lastHourlyDayEpoch = 0;  // ✅ traccia l'ultima data (epoch) per rollover corretto
 
 // ===== AH ISTOGRAMMI (NUOVO SISTEMA) =====
 
@@ -1269,6 +1272,12 @@ void setup() {
       rtcBaseEpoch = now.unixtime();
       rtcBaseMillis = millis();
       timeValid = true;
+      // ✅ Inizializza le variabili globali con i valori del RTC
+      currentYear = now.year();
+      currentMonth = now.month();
+      currentDay = now.day();
+      currentHour = now.hour();
+      currentMinute = now.minute();
       Serial.printf("[RTC] Avvio da RTC: %04d-%02d-%02d %02d:%02d\n",
         now.year(), now.month(), now.day(), now.hour(), now.minute());
     } else {
@@ -1456,6 +1465,12 @@ if (!adsSolarOk) {
   }
   restoreHourlyAhFromSD();
   restoreAhDayFromSD();
+  
+  // ✅ Inizializza lastHourlyDayEpoch per il rollover basato su data
+  if (timeValid) {
+    lastHourlyDayEpoch = nowEpoch() / 86400;
+  }
+  
   lastAhUpdateMillis = millis();
   freezeAhIntegration = false;   // ✅ assicurati che l'integrazione sia ATTIVA all'avvio
   
@@ -1681,6 +1696,9 @@ server.on("/level", []() {
   );
   
   // Task dedicato al DHT esterno (Core 0, insieme al SensorLoop)
+  // DISABILITATO TEMPORANEAMENTE per test diagnostico watchdog (verifica INT_WDT)
+  // #define ENABLE_DHT_TASK false
+  #if ENABLE_DHT_TASK
   xTaskCreatePinnedToCore(
     DHTTask,
     "DHTTask",
@@ -1690,6 +1708,7 @@ server.on("/level", []() {
     NULL,
     0
   );
+  #endif
 
   // Primo redraw all'avvio
   displayDirty = true;
@@ -1753,13 +1772,19 @@ void SensorLoop(void *pvParameters) {
 
        
         // ============================================================
-        // 2) CAMBIO GIORNO AH
+        // 2) CAMBIO GIORNO AH (basato su data RTC, non solo ora)
         // ============================================================
-        static int prevHour = -1;
         bool dayRolled = false;
-        if (prevHour == -1) prevHour = currentHour;
-        if (prevHour > currentHour) dayRolled = true;
-        prevHour = currentHour;
+        
+        if (timeValid) {
+          // Calcola l'epoch del giorno corrente (mezzanotte)
+          time_t currentDayEpoch = nowEpoch() / 86400;
+          
+          if (lastHourlyDayEpoch != 0 && lastHourlyDayEpoch != currentDayEpoch) {
+            dayRolled = true;
+          }
+          lastHourlyDayEpoch = currentDayEpoch;
+        }
 
         // ===== SALVATAGGIO ORARIO AH =====
         static int lastHourSaved = -1;
@@ -1780,6 +1805,8 @@ void SensorLoop(void *pvParameters) {
                 solAhHourlyToday[i] = 0.0f;
             }
             solarAhToday = 0;
+            ahYesterdayTotal_global = ahTodayTotal_global;       // ✅ trasferisci totale ieri
+            ahChargeYesterdayTotal_global = ahChargeTodayTotal_global;  // ✅ trasferisci totale ieri
             ahTodayTotal_global = 0;
             ahChargeTodayTotal_global = 0;
             solAhYesterdayTotal_global = solAhTodayTotal_global;  // ✅ trasferisci totale ieri
@@ -1934,6 +1961,10 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     // ✅ accumuli nelle ore (SOLO QUI!)
     ahHourlyToday[currentHour]       += minuteDischarge;
     ahChargeHourlyToday[currentHour] += minuteCharge;
+    
+    // ✅ accumulo totali giornalieri globali
+    ahTodayTotal_global += minuteDischarge;
+    ahChargeTodayTotal_global += minuteCharge;
 
     // ✅ reset accumulatori minuto
     ahMinuteDischargeAccum = 0.0f;
@@ -2357,6 +2388,14 @@ void saveHourlyAhToSD() {
   }
 
   f.seek(0);
+  
+  // ✅ salva header con data
+  AhDayHeader hdr;
+  hdr.year  = currentYear;
+  hdr.month = currentMonth;
+  hdr.day   = currentDay;
+  f.write((uint8_t*)&hdr, sizeof(hdr));
+  
   f.write((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
 
   f.flush();
@@ -2398,6 +2437,10 @@ void saveAhToSD() {
   f.write((uint8_t*)solAhHourlyYesterday, sizeof(solAhHourlyYesterday));
   
   // ✅ salva totali
+  f.write((uint8_t*)&ahTodayTotal_global, sizeof(ahTodayTotal_global));
+  f.write((uint8_t*)&ahYesterdayTotal_global, sizeof(ahYesterdayTotal_global));
+  f.write((uint8_t*)&ahChargeTodayTotal_global, sizeof(ahChargeTodayTotal_global));
+  f.write((uint8_t*)&ahChargeYesterdayTotal_global, sizeof(ahChargeYesterdayTotal_global));
   f.write((uint8_t*)&solAhTodayTotal_global, sizeof(solAhTodayTotal_global));
   f.write((uint8_t*)&solAhYesterdayTotal_global, sizeof(solAhYesterdayTotal_global));
 
@@ -2429,12 +2472,34 @@ void restoreHourlyAhFromSD() {
     return;
   }
 
-  f.read((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
+  // ✅ Leggi header con data (primi 4 byte: year, month, day)
+  AhDayHeader hdr;
+  if (f.read((uint8_t*)&hdr, sizeof(hdr)) == sizeof(hdr)) {
+    // Verifica se la data del file corrisponde a quella corrente
+    if (hdr.year == currentYear && hdr.month == currentMonth && hdr.day == currentDay) {
+      // Data corrisponde: ripristina gli array orari
+      f.read((uint8_t*)ahHourlyToday, sizeof(ahHourlyToday));
+      Serial.println("[AH] ripristinato da SD (stesso giorno)");
+    } else {
+      // Data non corrisponde: scarta i dati e inizializza a zero
+      Serial.printf("[AH] Data file non corrisponde (file: %04d-%02d-%02d, attuale: %04d-%02d-%02d) - inizializzo array a zero\n",
+        hdr.year, hdr.month, hdr.day,
+        currentYear, currentMonth, currentDay);
+      
+      // ✅ Inizializza esplicitamente a zero gli array
+      for (int i = 0; i < 24; i++) {
+        ahHourlyToday[i] = 0.0f;
+      }
+    }
+  } else {
+    // File senza header o corrotto: inizializza a zero
+    for (int i = 0; i < 24; i++) {
+      ahHourlyToday[i] = 0.0f;
+    }
+  }
 
   f.close();
   xSemaphoreGive(sdMutex);
-
-  Serial.println("[AH] ripristinato da SD");
 }
 
 void restoreAhDayFromSD() {
@@ -2463,11 +2528,26 @@ void restoreAhDayFromSD() {
     return;
   }
 
-  // ✅ Verifica data: se non corrisponde, scarta i dati
+  // ✅ Verifica data: se non corrisponde, scarta i dati e inizializza a zero
   if (hdr.year != currentYear || hdr.month != currentMonth || hdr.day != currentDay) {
-    Serial.printf("[AH] Data non corrisponde (file: %04d-%02d-%02d, attuale: %04d-%02d-%02d) - scarto i dati\n",
+    Serial.printf("[AH] Data non corrisponde (file: %04d-%02d-%02d, attuale: %04d-%02d-%02d) - inizializzo array a zero\n",
       hdr.year, hdr.month, hdr.day,
       currentYear, currentMonth, currentDay);
+    
+    // ✅ Inizializza esplicitamente a zero gli array
+    for (int i = 0; i < 24; i++) {
+      ahHourlyToday[i] = 0.0f;
+      ahChargeHourlyToday[i] = 0.0f;
+      solAhHourlyToday[i] = 0.0f;
+      solAhHourlyYesterday[i] = 0.0f;
+    }
+    ahTodayTotal_global = 0.0f;
+    ahYesterdayTotal_global = 0.0f;
+    ahChargeTodayTotal_global = 0.0f;
+    ahChargeYesterdayTotal_global = 0.0f;
+    solAhTodayTotal_global = 0.0f;
+    solAhYesterdayTotal_global = 0.0f;
+    
     f.close();
     xSemaphoreGive(sdMutex);
     return;
@@ -2479,7 +2559,11 @@ void restoreAhDayFromSD() {
   f.read((uint8_t*)solAhHourlyToday, sizeof(solAhHourlyToday));
   f.read((uint8_t*)solAhHourlyYesterday, sizeof(solAhHourlyYesterday));
   
-  // ✅ Ripristina totali
+  // ✅ Ripristina totali Ah
+  f.read((uint8_t*)&ahTodayTotal_global, sizeof(ahTodayTotal_global));
+  f.read((uint8_t*)&ahYesterdayTotal_global, sizeof(ahYesterdayTotal_global));
+  f.read((uint8_t*)&ahChargeTodayTotal_global, sizeof(ahChargeTodayTotal_global));
+  f.read((uint8_t*)&ahChargeYesterdayTotal_global, sizeof(ahChargeYesterdayTotal_global));
   f.read((uint8_t*)&solAhTodayTotal_global, sizeof(solAhTodayTotal_global));
   f.read((uint8_t*)&solAhYesterdayTotal_global, sizeof(solAhYesterdayTotal_global));
 

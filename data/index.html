@@ -685,75 +685,60 @@ function showPage(name){
 
   if (name === "batteria") {
       requestAnimationFrame(() => drawAhGauge(ahPct));
-      // Primo fetch immediato ah24h quando si apre la pagina Batteria
-      fetchAh24hData();
   }
 
+  document.querySelectorAll(".tab")
+    .forEach(t => t.classList.remove("active"));
 
+  const tab = [...document.querySelectorAll(".tab")]
+    .find(t => t.textContent.trim().toLowerCase() === name);
 
-document.querySelectorAll(".tab")
-  .forEach(t => t.classList.remove("active"));
+  if (tab) tab.classList.add("active");
 
-const tab = [...document.querySelectorAll(".tab")]
-  .find(t => t.textContent.trim().toLowerCase() === name);
+  if (name === "livello") {
+      fetch("/levelSpeed?mode=fast").catch(()=>{});
+      startFastLevelPolling();    
+      levelFastLoop();            
+  } else {
+      fetch("/levelSpeed?mode=slow").catch(()=>{});
+      stopFastLevelPolling();
+  }
 
-if (tab) tab.classList.add("active");
+  if (name === "solare") {
+    if (window.lastData) {
+      
+      const savedSolarDay = localStorage.getItem("solarAhDay") || "today";
+      showSolarAh(savedSolarDay); 
 
+      updateSolarCurrentRange();
 
-if (name === "livello") {
-    fetch("/levelSpeed?mode=fast").catch(()=>{});
-    startFastLevelPolling();    
-    levelFastLoop();            
-} else {
-    fetch("/levelSpeed?mode=slow").catch(()=>{});
-    stopFastLevelPolling();
-}
+      if (solarCurrentChart) {
+        requestAnimationFrame(() => {
+          solarCurrentChart.resize();
+          solarCurrentChart.update();
+        });
 
-// Gestione polling ah24h: avvia quando si entra in Batteria, ferma quando si esce
-if (name === "batteria") {
-    // Il fetchAh24hData() è già stato chiamato sopra, il timer è avviato
-} else {
-    clearTimeout(ah24hTimer);
-    ah24hTimer = null;
-}
+      }
 
-if (name === "solare") {
-  if (window.lastData) {
-    
-  const savedSolarDay = localStorage.getItem("solarAhDay") || "today";
-  showSolarAh(savedSolarDay); 
-
-    updateSolarCurrentRange();
-
-    if (solarCurrentChart) {
-      requestAnimationFrame(() => {
-        solarCurrentChart.resize();
-        solarCurrentChart.update();
-      });
-
-    }
-
-    if (Array.isArray(window.lastData.solAhHourlyToday)) {
-      updateSolarAhBars(window.lastData.solAhHourlyToday);
+      if (Array.isArray(window.lastData.solAhHourlyToday)) {
+        updateSolarAhBars(window.lastData.solAhHourlyToday);
+      }
     }
   }
-}
 
+  // imposta lo stato visivo dei pulsanti Oggi/Ieri (Solare)
+  document.querySelectorAll("[data-solah]").forEach(b =>
+    b.classList.toggle("active", b.getAttribute("data-solah") === "today")
+  );
 
-// imposta lo stato visivo dei pulsanti Oggi/Ieri (Solare)
-document.querySelectorAll("[data-solah]").forEach(b =>
-  b.classList.toggle("active", b.getAttribute("data-solah") === "today")
-);
+  // aggiorna subito il totale "oggi"
+  const tot = window.lastData?.solAhTodayTotal;
+  if (typeof tot === 'number') {
+    document.getElementById("solarAhTotal").textContent = `Totale oggi: ${tot.toFixed(2)} Ah`;
+  }
 
-// aggiorna subito il totale "oggi"
-const tot = window.lastData?.solAhTodayTotal;
-if (typeof tot === 'number') {
-  document.getElementById("solarAhTotal").textContent = `Totale oggi: ${tot.toFixed(2)} Ah`;
-}
-
-
-// fetch immediato dei dati della pagina selezionata
-fetchPageData();
+  // fetch immediato dei dati della pagina selezionata
+  fetchPageData();
 
 }
 
@@ -1032,35 +1017,11 @@ let fetchIntervalMs = 1000;    // base per dati live
 let backoff = 0;               // step di backoff
 let lastPayloadHash = null;
 
-// Timer separato per ah24h (60 secondi)
-let ah24hTimer = null;
-let ah24hLastFetch = 0;
-
-function hashObject(obj){
-  try {
-    return JSON.stringify(obj);
-  } catch { return null; }
-}
-
-async function fetchAh24hData() {
-    if (document.hidden) return;
-    if (currentPage !== "batteria") return;
-
-    try {
-        const ahResp = await fetch("/data/ah24h");
-        const ahData = await ahResp.json();
-        updateAh24hData(ahData);
-    } catch (e) {
-        console.warn("fetchAh24hData error:", e);
+    function hashObject(obj){
+      try {
+        return JSON.stringify(obj);
+      } catch { return null; }
     }
-
-    scheduleNextAh24hFetch();
-}
-
-function scheduleNextAh24hFetch() {
-    clearTimeout(ah24hTimer);
-    ah24hTimer = setTimeout(fetchAh24hData, 60000);
-}
 
 async function fetchPageData() {
     if (document.hidden) return;
@@ -1162,20 +1123,12 @@ function updateBatteryPage(d){
     document.getElementById("eff").textContent =
        (typeof d.eff === 'number') ? Math.round(d.eff * 100) + "%" : "--";
 
-    // NOTA: I dati Ah orari vengono letti da /data/ah24h via updateAh24hData()
-
-    ahPct = d.socPct;
-    drawAhGauge(ahPct);
-}
-
-// Aggiorna i dati Ah orari dall'endpoint /data/ah24h
-function updateAh24hData(d) {
+    // ===== AGGIORNA AH ORARI E TOTALI (stesso modello di updateSolarPage) =====
     ahToday           = normalizeHourlyArray(d.ahHourlyToday);
     ahYesterday       = normalizeHourlyArray(d.ahHourlyYesterday);
     ahChargeToday     = normalizeHourlyArray(d.ahChargeHourlyToday);
     ahChargeYesterday = normalizeHourlyArray(d.ahChargeHourlyYesterday);
     
-    // Salva i totali per showAhDay/showAhChargeDay
     ahTodayTotal     = d.ahTodayTotal     ?? 0;
     ahYesterdayTotal = d.ahYesterdayTotal ?? 0;
     ahChargeTodayTotal = d.ahChargeTodayTotal ?? 0;
@@ -1186,8 +1139,10 @@ function updateAh24hData(d) {
     ensureAhChargeHourlyChart();
     showAhDay(localStorage.getItem("ahDay") || "today");
     showAhChargeDay(localStorage.getItem("ahChargeDay") || "today");
-}
 
+    ahPct = d.socPct;
+    drawAhGauge(ahPct);
+}
 
 function updateSolarPage(d){
   solarFullLabels = Array.isArray(d.labels) ? d.labels : [];   // legacy
