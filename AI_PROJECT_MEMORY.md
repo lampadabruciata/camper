@@ -340,7 +340,6 @@ float solAhYesterdayTotal_global; // 4 byte
 | `/data/solar` | GET | Dati solare (JSON) |
 | `/data/water` | GET | Dati acqua (JSON) |
 | `/data/gas` | GET | Dati gas (JSON) |
-| `/data/ah24h` | GET | Ah orari 24h (JSON) |
 | `/data/ahLive` | GET | Ah ultimi 60 minuti (JSON) |
 | `/setTime` | GET | Imposta orologio RTC |
 | `/setAh` | GET | Imposta capacità batteria Ah |
@@ -452,6 +451,31 @@ float solAhYesterdayTotal_global; // 4 byte
 | Implementare queue per dati display | Media | Per ridurre race condition sui flag |
 | Separare logica di integrazione Ah | Alta | In file dedicato `resource_ah.cpp` |
 | Aggiungere test unitari | Media | Per verificare logica di integrazione |
+
+---
+
+## # Stato progetto
+
+### Aggiornamenti recenti
+- **Refactoring pagina Batteria**:
+  - Eliminato endpoint `/data/ah24h`
+  - Integrati dati Ah in `/data/battery`
+- **Fix rollover giornaliero**:
+  - Sostituito `prevHour > currentHour`
+  - Con confronto day epoch RTC
+- **Fix restore RTC**:
+  - Inizializzazione `currentYear/currentMonth/currentDay`
+  - Da RTC al boot
+- **Diagnosi watchdog**:
+  - DHTTask disabilitato per test
+  - Uptime > 12.000.000 ms senza reboot
+
+---
+
+## # Problemi ancora aperti
+
+- **Confermare definitivamente correlazione DHT ↔ INT_WDT**
+- **Valutare sostituzione libreria DHT**
 
 ---
 

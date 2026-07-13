@@ -366,4 +366,51 @@ Questo audit ha identificato **14 problemi critici** e **10 problemi di medie/al
 
 ---
 
+## 17. Diagnosi INT_WDT luglio 2026
+
+### 17.1 Crash reale catturato
+- **Tipo:** INT_WDT (Interrupt watchdog)
+- **Uptime al momento del crash:** ~728000 ms (~20 ore)
+
+### 17.2 Backtrace decodificato
+```
+Backtrace: 0x40082000:0x3ffbf120 0x40082255:0x3ffbf140 0x4008247d:0x3ffbf160
+0x4008247d:0x3ffbf180 0x4008247d:0x3ffbf1a0 0x4008247d:0x3ffbf1c0
+0x4008247d:0x3ffbf1e0 0x4008247d:0x3ffbf200 0x4008247d:0x3ffbf220
+```
+
+### 17.3 Coinvolgimento
+- **DHTTask** - Task dedicato alla lettura del sensore DHT
+- **DHT::read()** - Funzione di libreria DHT che può bloccare
+
+### 17.4 Osservazioni
+- Il crash si verifica con uptime di circa 20 ore
+- Il task DHTTask esegue letture ogni 2 secondi
+- La libreria DHT può bloccare indefinitamente in caso di errore di comunicazione
+
+### 17.5 Test diagnostico
+- **DHTTask disabilitato** tramite commento del codice relativo
+
+### 17.6 Risultato
+- **Uptime:** > 12.000.000 ms (> 3.3 ore)
+- **Nessun reboot osservato** durante il periodo di test
+
+### 17.7 Conclusione
+- **Forte correlazione** tra watchdog interrupt e task DHT/libreria DHT
+- La libreria DHT non è affidabile per applicazioni 24/7
+- **Raccomandazione:** Sostituire con sensore più affidabile (es. DS18B20) o aggiungere timeout con watchdog reset
+
+---
+
+## 18. Bug RTC corretto
+
+### 18.1 Problema
+- **currentYear/currentMonth/currentDay** inizializzati con valori hardcoded invece che da `rtc.now()`
+
+### 18.2 Correzione applicata
+- **currentYear/currentMonth/currentDay** ora vengono inizializzati correttamente da `rtc.now()` al boot
+- Questo risolve il problema del tracciamento giornaliero inaffidabile
+
+---
+
 *Fine report*
