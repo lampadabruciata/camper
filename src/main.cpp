@@ -44,7 +44,7 @@ void DisplayTask(void *param);  // forward declaration
 #define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
 
 // === CONFIGURAZIONE TASK DHT (per test diagnostico watchdog) ===
-#define ENABLE_DHT_TASK false  // DISABILITATO: verifica se gli INT_WDT spariscono
+#define ENABLE_DHT_TASK true  // DISABILITATO: verifica se gli INT_WDT spariscono
 
 // ==== QUEUE PER SCRITTURE NVS (Preferences) ====
 QueueHandle_t prefsQueue;
