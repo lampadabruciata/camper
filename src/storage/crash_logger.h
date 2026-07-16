@@ -44,4 +44,7 @@ extern bool initSD();
 // Log crash su SD
 void logCrash(const char *reason);
 
+// Log boot su SD (registrazione sempre)
+void logBoot();
+
 #endif // CRASH_LOGGER_H

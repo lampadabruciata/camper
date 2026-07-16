@@ -479,18 +479,38 @@ float solAhYesterdayTotal_global; // 4 byte
 
 ---
 
-## # Stabilità ESP32
+## # Test stabilità DHT - Luglio 2026
 
+- Test con ENABLE_DHT_TASK = false
+- Uptime raggiunto: >156.000.000 ms (~43,5 ore)
+- Nessun reboot osservato
+- Nessun INT_WDT osservato
+- Heap stabile (~130-136 KB)
+
+- Test successivo con ENABLE_DHT_TASK = true
+- Reboot osservato durante il test
+- Indagine ancora aperta
+
+Conclusione provvisoria:
+- Forte correlazione tra DHTTask attivo e reboot.
+- DHT rimane il principale sospettato.
+- Necessaria ulteriore conferma tramite bootlog e crashlog.
+
+ 
+## # Stabilità ESP32
+ 
 ### Potenziali memory leak
 - `restoreGraphFromSD()`: malloc() per buffer file (controllato, free() chiamato)
 - `String` in ArduinoJson: usato `DynamicJsonDocument` con dimensioni fisse
 - Allocamenti in `crash_logger.cpp`: vettore di stringhe (limitato a 20 eventi)
-
+ 
 ### Potenziali race condition
+```
 - `pulseCount`: modificata in ISR, letta in task (gestita con detach/attach)
 - Variabili Ah: protette con `stateMux` critical section
 - Accesso I2C: protetto con `i2cMutex`
 - Accesso SD: protetto con `sdMutex`
+```
 
 ### Rischi watchdog
 - Tutti i task hanno `esp_task_wdt_add(NULL)`

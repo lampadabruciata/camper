@@ -185,3 +185,77 @@ void logCrash(const char *reason) {
   xSemaphoreGive(sdMutex);
   crashLogging = false;
 }
+
+void logBoot() {
+  // ----------- TIME STRING ROBUSTO -----------
+  char clockBuf[32] = "UNKNOWN";
+
+  // ✅ 1) PROVA DIRETTA RTC (NON DIPENDE DA timeValid)
+  if (rtc.begin()) {
+    DateTime now = rtc.now();
+    if (now.year() >= 2023 && now.year() < 2100) {
+      snprintf(clockBuf, sizeof(clockBuf),
+               "%04d-%02d-%02d %02d:%02d:%02d",
+               now.year(), now.month(), now.day(),
+               now.hour(), now.minute(), now.second());
+    }
+  }
+
+  // ✅ 2) FALLBACK: usa tempo derivato (se RTC non pronto)
+  if (strcmp(clockBuf, "UNKNOWN") == 0 && timeValid) {
+    snprintf(clockBuf, sizeof(clockBuf),
+             "%04d-%02d-%02d %02d:%02d:%02d",
+             currentYear, currentMonth, currentDay,
+             currentHour, currentMinute, 0);
+  }
+
+  // ----------- SD INIT -----------
+  if (!initSD()) {
+    return;
+  }
+
+  if (sdMutex == NULL) {
+    sdMutex = xSemaphoreCreateMutex();
+    if (sdMutex == NULL) return;
+  }
+
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300)) != pdTRUE) {
+    return;
+  }
+
+  // ----------- RESET REASON COMPLETO -----------
+  esp_reset_reason_t rr = esp_reset_reason();
+  const char* rrStr = "UNKNOWN";
+
+  switch (rr) {
+    case ESP_RST_POWERON:   rrStr = "POWERON"; break;
+    case ESP_RST_EXT:       rrStr = "EXT_RESET (USB/BTN)"; break;
+    case ESP_RST_SW:        rrStr = "SW_RESET"; break;
+    case ESP_RST_PANIC:     rrStr = "PANIC"; break;
+    case ESP_RST_INT_WDT:   rrStr = "INT_WDT"; break;
+    case ESP_RST_TASK_WDT:  rrStr = "TASK_WDT"; break;
+    case ESP_RST_WDT:       rrStr = "WDT"; break;
+    case ESP_RST_DEEPSLEEP: rrStr = "DEEPSLEEP_WAKE"; break;
+    case ESP_RST_BROWNOUT:  rrStr = "BROWNOUT"; break;
+    case ESP_RST_SDIO:      rrStr = "SDIO"; break;
+    default:                rrStr = "UNKNOWN"; break;
+  }
+
+  // ----------- INFO SISTEMA -----------
+  uint32_t heap = ESP.getFreeHeap();
+
+  // ----------- COSTRUZIONE EVENTO (snprintf) -----------
+  char lineBuf[128];
+  snprintf(lineBuf, sizeof(lineBuf),
+           "%s | %s | heap=%u\n",
+           clockBuf, rrStr, heap);
+
+  // ----------- SALVA IN APPEND -----------
+  File w = SD.open("/bootlog.txt", FILE_APPEND);
+  if (w) {
+    w.print(lineBuf);
+    w.close();
+  }
+
+  xSemaphoreGive(sdMutex);
+}
