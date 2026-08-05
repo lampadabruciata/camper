@@ -44,7 +44,7 @@ void DisplayTask(void *param);  // forward declaration
 #define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
 
 // === CONFIGURAZIONE TASK DHT (per test diagnostico watchdog) ===
-#define ENABLE_DHT_TASK true  // DISABILITATO: verifica se gli INT_WDT spariscono
+#define ENABLE_DHT_TASK false  // DISABILITATO: verifica se gli INT_WDT spariscono
 
 // ==== QUEUE PER SCRITTURE NVS (Preferences) ====
 QueueHandle_t prefsQueue;
@@ -663,21 +663,36 @@ void appendWaterDataToJson(JsonDocument &json) {
 void DHTTask(void *param) {
   esp_task_wdt_add(NULL);
   for (;;) {
-    // (può richiedere fino a ~250 ms)
-    // DHT esterno
+    uint32_t start = micros();
+
     float tExt = dhtExt.readTemperature();
+    uint32_t afterExtTemp = micros();
+
     float hExt = dhtExt.readHumidity();
+    uint32_t afterExtHum = micros();
+
+    float tInt = dhtInt.readTemperature();
+    uint32_t afterIntTemp = micros();
+
+    float hInt = dhtInt.readHumidity();
+    uint32_t afterIntHum = micros();
+
     if (!isnan(tExt)) tempExt = tExt;
     if (!isnan(hExt)) humExt = hExt;
-
-    // DHT interno
-    float tInt = dhtInt.readTemperature();
-    float hInt = dhtInt.readHumidity();
     if (!isnan(tInt)) tempInt = tInt;
     if (!isnan(hInt)) humInt = hInt;
 
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(2000));  // DHT ≥ 2s tra letture (consigliato)
+
+    DBG_PRINTF(
+      "[DHT] extT=%lu extH=%lu intT=%lu intH=%lu total=%lu us\n",
+      afterExtTemp - start,
+      afterExtHum - afterExtTemp,
+      afterIntTemp - afterExtHum,
+      afterIntHum - afterIntTemp,
+      afterIntHum - start
+    );
   }
 }
 
@@ -1696,8 +1711,8 @@ server.on("/level", []() {
   );
   
   // Task dedicato al DHT esterno (Core 0, insieme al SensorLoop)
-  // DISABILITATO TEMPORANEAMENTE per test diagnostico watchdog (verifica INT_WDT)
-  // #define ENABLE_DHT_TASK false
+  
+  #define ENABLE_DHT_TASK false
   #if ENABLE_DHT_TASK
   xTaskCreatePinnedToCore(
     DHTTask,
@@ -1719,6 +1734,7 @@ server.on("/level", []() {
   isDimmed  = false;
   nextDimAt = millis() + 30000UL;  // tra 30s si spegne la luce se non interagisci
 
+  logBoot();
 
   DBG_PRINTLN("Setup completato (versione A).");
 
