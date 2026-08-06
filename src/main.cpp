@@ -14,7 +14,6 @@
 #include <Adafruit_ADS1X15.h>
 #include <Preferences.h>
 #include <Adafruit_Sensor.h>
-#include "DHT.h"
 #include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -30,6 +29,7 @@
 #include "web/web_manager.h"
 #include "storage/graph_storage.h"
 #include "storage/crash_logger.h"
+#include "dht/dht_manager.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -113,14 +113,6 @@ extern void debugSDWriteResult(const char* file, bool ok, size_t written, uint32
 
 // Sensore flusso acqua
 #define FLOW_SENSOR_PIN 27
-
-// Sensore esterno AM2301 (DHT21)
-#define AM2301_PIN 14
-
-
-// Sensore interno DHT21
-#define DHT_INT_PIN 4
-
 
 // SD card (VSPI)
 #define SD_CS 15   // CS; altri pin VSPI default: MOSI=23, MISO=19, SCK=18
@@ -226,15 +218,8 @@ const float alphaSolar = 0.6f;   // stesso filtro della corrente batteria
 // ====================== TEMPERATURE =========================
 
 
-// ===== TEMPERATURA LIVE MINIMALE =====
-volatile float tempInt = NAN;
-volatile float humInt  = NAN;
-volatile float tempExt = NAN;
-volatile float humExt  = NAN;
-
-// AM2301 (DHT21) esterno su GPIO 14
-DHT dhtExt(AM2301_PIN, DHT21);
-DHT dhtInt(DHT_INT_PIN, DHT21);
+// Le istanze fisiche DHT (dhtExt, dhtInt) sono definite in
+// dht_manager.cpp e dichiarate extern in dht_manager.h.
 
 // =======================================================
 // ===================  GAS (HX711)  =====================
@@ -559,8 +544,6 @@ void  handleManualGas2();
 
 // Display/sensori
 void  drawOLED();
-void  readTempInternal();
-void  readTempExternal();
 void  SensorLoop(void *pvParameters);
 
 // temperature
@@ -665,33 +648,15 @@ void DHTTask(void *param) {
   for (;;) {
     uint32_t start = micros();
 
-    float tExt = dhtExt.readTemperature();
-    uint32_t afterExtTemp = micros();
-
-    float hExt = dhtExt.readHumidity();
-    uint32_t afterExtHum = micros();
-
-    float tInt = dhtInt.readTemperature();
-    uint32_t afterIntTemp = micros();
-
-    float hInt = dhtInt.readHumidity();
-    uint32_t afterIntHum = micros();
-
-    if (!isnan(tExt)) tempExt = tExt;
-    if (!isnan(hExt)) humExt = hExt;
-    if (!isnan(tInt)) tempInt = tInt;
-    if (!isnan(hInt)) humInt = hInt;
+    updateDHT();
+    uint32_t afterUpdate = micros();
 
     esp_task_wdt_reset();
     vTaskDelay(pdMS_TO_TICKS(2000));  // DHT ≥ 2s tra letture (consigliato)
 
     DBG_PRINTF(
-      "[DHT] extT=%lu extH=%lu intT=%lu intH=%lu total=%lu us\n",
-      afterExtTemp - start,
-      afterExtHum - afterExtTemp,
-      afterIntTemp - afterExtHum,
-      afterIntHum - afterIntTemp,
-      afterIntHum - start
+      "[DHT] total=%lu us\n",
+      afterUpdate - start
     );
   }
 }
@@ -1307,13 +1272,8 @@ void setup() {
 
  
 
-  // ----------- AM2301 esterno -----------
-  dhtExt.begin();
-  Serial.println("AM2301 OK");
-
-  // ----------- DHT interno -----------
-  dhtInt.begin();
-  Serial.println("DHT interno OK");
+  // ----------- Sensori DHT (interno + esterno) -----------
+  initDHT();
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
 

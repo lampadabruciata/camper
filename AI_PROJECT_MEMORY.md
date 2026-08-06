@@ -580,4 +580,116 @@ Conclusione provvisoria:
 
 ---
 
+## # 2026-08-05 - Watchdog Investigation Checkpoint
+
+### Stato del firmware
+- Creata baseline stabile salvata in Git.
+- Commit: 2c56497
+- Messaggio commit:
+  "Stabilized firmware, DHT task disabled for watchdog investigation"
+
+### DHT
+- DHTTask disabilitato tramite:
+  `#define ENABLE_DHT_TASK false`
+- DHTTask non viene compilato né creato.
+- Sensori DHT inizializzati correttamente all'avvio.
+- Nessuna lettura periodica DHT durante il test.
+
+### Misure temporali DHT
+Diagnostica corretta effettuata.
+
+Tempi osservati:
+- extTemp ≈ 6-9 ms
+- extHum ≈ 15-25 us
+- intTemp ≈ 5-9 ms
+- intHum ≈ 2-6 us
+- tempo totale ciclo ≈ 12-16 ms
+
+Conclusioni:
+- La precedente misura di circa 2 secondi era dovuta a strumentazione errata.
+- Le letture DHT non mostrano blocchi di centinaia di millisecondi o secondi.
+
+### SD Card
+- La SD è stata trovata in stato RAW.
+- CHKDSK ha ripristinato FAT32.
+- Rilevate numerose catene FAT corrotte e collegamenti non validi.
+- Alcuni file di log risultavano persi dopo il recupero.
+- Successivamente la SD è stata formattata e riutilizzata.
+
+### Hardware / I2C
+Durante alcuni avvii:
+- nessun dispositivo I2C rilevato
+- RTC assente
+- ADS1115 assente
+- LIS3DH assente
+
+Dopo riavvio:
+- RTC rilevato
+- ADS1115 principale rilevato
+- ADS1115 solare rilevato
+- LIS3DH rilevato
+
+Possibile problema di contatti, cablaggio o affidabilità del bus I2C.
+
+### Stabilità osservata
+Con `ENABLE_DHT_TASK=false`:
+- uptime osservato di circa 18 ore
+- nessun INT_WDT osservato nei log raccolti
+- heap stabile
+- stack stabile
+- ADS=1
+- LIS=1
+- SD funzionante
+- WebServer funzionante
+
+### Baseline attuale
+Configurazione considerata stabile e usata come riferimento per i successivi test e refactoring.
+
+---
+
+## # 2026-08-06 - Refactoring completo sottosistema DHT
+
+### Refactoring
+- Refactoring completo del sottosistema DHT.
+- Creazione di:
+  - `src/dht/dht_manager.h`
+  - `src/dht/dht_manager.cpp`
+
+### Trasferimento nel modulo DHT
+- Variabili:
+  - `tempInt` / `humInt`
+  - `tempExt` / `humExt`
+- Istanze:
+  - `dhtInt`
+  - `dhtExt`
+- Funzioni:
+  - `initDHT()`
+  - `readDHTExternal()`
+  - `readDHTInternal()`
+  - `updateDHT()`
+
+### Rimozione codice morto
+- `readTempInternal()`
+- `readTempExternal()`
+- Include DHT inutili
+- `extern` inutili dei sensori DHT
+- Macro pin DHT duplicate
+
+### Stato attuale
+- DHT inizializzato ma non attivo.
+- `updateDHT()` presente e pronta all'uso.
+- `DHTTask` ancora presente ma disabilitata.
+- Nessuna regressione osservata.
+
+### Test eseguiti
+- Compilazione OK
+- Upload OK
+- Uptime circa 20 ore
+- ADS=1 stabile
+- LIS=1 stabile
+- Heap stabile
+- Nessun watchdog osservato
+
+---
+
 *Fine documento - Questo file è la memoria permanente del progetto e dovrebbe essere aggiornato ad ogni modifica significativa.*
