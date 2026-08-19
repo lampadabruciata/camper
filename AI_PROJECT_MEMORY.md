@@ -692,4 +692,63 @@ Configurazione considerata stabile e usata come riferimento per i successivi tes
 
 ---
 
+## #  ️2026-08-19 - Diagnostica avanzata INT_WDT e riattivazione DHT
+
+### DHT completamente migrato
+- Migrazione completata nel modulo dedicato:
+  - `src/dht/dht_manager.h`
+  - `src/dht/dht_manager.cpp`
+
+### DHTTask
+- Mantenuta ma **non utilizzata**.
+- La lettura DHT è ora gestita da `SensorLoop`.
+
+### updateDHT()
+- Eseguito da `SensorLoop` ogni **2 secondi**.
+- Letture DHT riattivate tramite `SensorLoop`.
+
+### Rimozione definitiva
+- `readTempInternal()`
+- `readTempExternal()`
+- `readTempLiveMinimal()`
+- Include DHT inutili
+- `extern` DHT inutili
+
+### Diagnostica avanzata INT_WDT
+Implementata diagnostica avanzata per l'analisi degli INT_WDT:
+- **Heartbeat task**: segnaposto per ogni task principale
+- **Timestamp task**: registrazione ultima esecuzione per task
+- **Tempi massimi task**: misura del tempo massimo di esecuzione per task
+- **Telemetria DHT**: conteggio letture, fallimenti e tempo massimo di lettura
+- **Crash logger esteso**: registrazione dati aggiuntivi per analisi post-reboot
+
+### Nuove variabili diagnostiche
+- **Heartbeat**:
+  - `hbLoop`
+  - `hbSensorLoop`
+  - `hbLevelTask`
+  - `hbDisplayTask`
+
+- **Timestamp ultima esecuzione**:
+  - `lastLoopMs`
+  - `lastSensorLoopMs`
+  - `lastLevelTaskMs`
+  - `lastDisplayTaskMs`
+
+- **Tempi massimi di esecuzione**:
+  - `loopMaxUs`
+  - `sensorLoopMaxUs`
+  - `levelTaskMaxUs`
+  - `displayTaskMaxUs`
+
+- **Telemetria DHT**:
+  - `dhtReads`
+  - `dhtReadFailures`
+  - `dhtMaxReadUs`
+
+### Obiettivo
+- Identificare il task o il sottosistema responsabile degli **INT_WDT** osservati il **19/08/2026**.
+
+---
+
 *Fine documento - Questo file è la memoria permanente del progetto e dovrebbe essere aggiornato ad ogni modifica significativa.*

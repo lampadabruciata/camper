@@ -38,6 +38,29 @@ extern TaskHandle_t SensorTask;
 extern TaskHandle_t DisplayTaskHandle;
 extern SemaphoreHandle_t sdMutex;
 
+// Heartbeat diagnostici (per individuare task bloccati prima di INT_WDT)
+extern volatile uint32_t hbSensorLoop;
+extern volatile uint32_t hbLevelTask;
+extern volatile uint32_t hbDisplayTask;
+extern volatile uint32_t hbLoop;
+
+// Timestamp ultimo ciclo task (ms)
+extern volatile unsigned long lastSensorLoopMs;
+extern volatile unsigned long lastLevelTaskMs;
+extern volatile unsigned long lastDisplayTaskMs;
+extern volatile unsigned long lastLoopMs;
+
+// Tempi massimi di esecuzione task (µs)
+extern volatile uint32_t sensorLoopMaxUs;
+extern volatile uint32_t levelTaskMaxUs;
+extern volatile uint32_t displayTaskMaxUs;
+extern volatile uint32_t loopMaxUs;
+
+// Diagnostica DHT
+extern volatile uint32_t dhtReads;
+extern volatile uint32_t dhtReadFailures;
+extern volatile uint32_t dhtMaxReadUs;
+
 // Funzione di inizializzazione SD
 extern bool initSD();
 

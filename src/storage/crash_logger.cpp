@@ -170,6 +170,25 @@ void logCrash(const char *reason) {
 
   newEvent += "WiFiClients=" + String(wifiClients) + "\n";
 
+  newEvent += "HB: loop=" + String((unsigned long)hbLoop) +
+              " sensor=" + String((unsigned long)hbSensorLoop) +
+              " level=" + String((unsigned long)hbLevelTask) +
+              " display=" + String((unsigned long)hbDisplayTask) + "\n";
+
+  newEvent += "LastMs: loop=" + String((unsigned long)lastLoopMs) +
+              " sensor=" + String((unsigned long)lastSensorLoopMs) +
+              " level=" + String((unsigned long)lastLevelTaskMs) +
+              " display=" + String((unsigned long)lastDisplayTaskMs) + "\n";
+
+  newEvent += "TaskMaxUs: loop=" + String((unsigned long)loopMaxUs) +
+              " sensor=" + String((unsigned long)sensorLoopMaxUs) +
+              " level=" + String((unsigned long)levelTaskMaxUs) +
+              " display=" + String((unsigned long)displayTaskMaxUs) + "\n";
+
+  newEvent += "DHT: reads=" + String((unsigned long)dhtReads) +
+              " failures=" + String((unsigned long)dhtReadFailures) +
+              " maxReadUs=" + String((unsigned long)dhtMaxReadUs) + "\n";
+
   newEvent += "--------------------\n";
 
   // ----------- SALVA -----------

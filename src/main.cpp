@@ -37,6 +37,24 @@ SemaphoreHandle_t hxMutex;
 SemaphoreHandle_t prefsMutex;  
 portMUX_TYPE stateMux = portMUX_INITIALIZER_UNLOCKED;
 
+// === HEARTBEAT DIAGNOSTICI (per individuare task bloccati prima di INT_WDT) ===
+volatile uint32_t hbSensorLoop = 0;
+volatile uint32_t hbLevelTask = 0;
+volatile uint32_t hbDisplayTask = 0;
+volatile uint32_t hbLoop = 0;
+
+// === TIMESTAMP TASK (ultimo heartbeat in ms, aggiornati ad ogni loop) ===
+volatile unsigned long lastSensorLoopMs = 0;
+volatile unsigned long lastLevelTaskMs  = 0;
+volatile unsigned long lastDisplayTaskMs = 0;
+volatile unsigned long lastLoopMs       = 0;
+
+// === TEMPI MASSIMI DI ESECUZIONE TASK (massimo storico, in µs) ===
+volatile uint32_t sensorLoopMaxUs = 0;
+volatile uint32_t levelTaskMaxUs  = 0;
+volatile uint32_t displayTaskMaxUs = 0;
+volatile uint32_t loopMaxUs       = 0;
+
 void i2cRecoverBus(void);  // forward declaration per il recovery I2C
 void DisplayTask(void *param);  // forward declaration
 
@@ -545,14 +563,6 @@ void  handleManualGas2();
 // Display/sensori
 void  drawOLED();
 void  SensorLoop(void *pvParameters);
-
-// temperature
-void readTempLiveMinimal() {
-    static unsigned long lastRead = 0;
-    if (millis() - lastRead < 30000) return;
-    lastRead = millis();
-
-}
 
 // =======================================================
 // =============== DISPLAY TIMEOUT HANDLER ================
@@ -1708,6 +1718,10 @@ void SensorLoop(void *pvParameters) {
     esp_task_wdt_add(NULL);
 
     for (;;) {
+        uint32_t loopStartUs = micros();
+        hbSensorLoop++;
+        lastSensorLoopMs = millis();
+
         unsigned long now = millis();
 
         // ---- ORA CORRENTE DA RTC (convertita in ora locale) ----
@@ -1725,7 +1739,14 @@ void SensorLoop(void *pvParameters) {
           currentYear = tm.Year + 1970;
         }
 
-        readTempLiveMinimal();
+        // ============================================================
+        // DHT — aggiornamento ogni 2 secondi (fuori da freezeSensors)
+        // ============================================================
+        static unsigned long lastDHTUpdate = 0;
+        if (now - lastDHTUpdate >= 2000) {
+            lastDHTUpdate = now;
+            updateDHT();
+        }
 
         // ============================================================
         // LIVELLA EXCLUSIVE MODE (se la pagina /level è aperta)
@@ -2091,6 +2112,8 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
 
         // WAIT
         esp_task_wdt_reset();
+        uint32_t loopElapsedUs = micros() - loopStartUs;
+        if (loopElapsedUs > sensorLoopMaxUs) sensorLoopMaxUs = loopElapsedUs;
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
@@ -2102,6 +2125,10 @@ void DisplayTask(void *param) {
     esp_task_wdt_add(NULL);
 
     for (;;) {
+        uint32_t displayStartUs = micros();
+        hbDisplayTask++;
+        lastDisplayTaskMs = millis();
+
         // attesa evento
         esp_task_wdt_reset(); 
         while (ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(1000)) == 0) {
@@ -2132,6 +2159,8 @@ void DisplayTask(void *param) {
 
         }        
 
+        uint32_t displayElapsedUs = micros() - displayStartUs;
+        if (displayElapsedUs > displayTaskMaxUs) displayTaskMaxUs = displayElapsedUs;
 
         vTaskDelay(1);
     }
@@ -2144,6 +2173,9 @@ void LevelTask(void *param) {
     esp_task_wdt_add(NULL);
 
     for (;;) {
+        uint32_t levelStartUs = micros();
+        hbLevelTask++;
+        lastLevelTaskMs = millis();
 
         // ✅ WATCHDOG SEMPRE RESET
         esp_task_wdt_reset();
@@ -2168,6 +2200,8 @@ void LevelTask(void *param) {
             // ✅ SE NON PRONTO → NON BLOCCARE MAI
             if (!levelReady) {
                 vTaskDelay(pdMS_TO_TICKS(10));
+                uint32_t levelElapsedUs = micros() - levelStartUs;
+                if (levelElapsedUs > levelTaskMaxUs) levelTaskMaxUs = levelElapsedUs;
                 continue;
             }
 
@@ -2187,6 +2221,9 @@ void LevelTask(void *param) {
 
             vTaskDelay(pdMS_TO_TICKS(100));
         }
+
+        uint32_t levelElapsedUs = micros() - levelStartUs;
+        if (levelElapsedUs > levelTaskMaxUs) levelTaskMaxUs = levelElapsedUs;
     }
 }
 
@@ -2709,7 +2746,10 @@ void monitorTaskStacks() {
 
 void loop() {
 
-    
+    uint32_t loopStartUs = micros();
+    hbLoop++;
+    lastLoopMs = millis();
+
 monitorTaskStacks();
     
     
@@ -2733,7 +2773,8 @@ monitorTaskStacks();
             Serial.printf(
                 "[HB] t=%lu  page=%d  dim=%d  excl=%d  lvlActive=%d  "
                 "ADS=%d  LIS=%d  V=%.2f  I=%.2f  SolA=%.2f  "
-                "Gas1=%.2f  Gas2=%.2f  Water=%.1f  Flow=%.2f  Heap=%u\n",
+                "Gas1=%.2f  Gas2=%.2f  Water=%.1f  Flow=%.2f  Heap=%u  "
+                "HB: loop=%lu  sensor=%lu  level=%lu  display=%lu\n",
                 now,
                 (int)currentPage,
                 isDimmed ? 1 : 0,
@@ -2748,7 +2789,11 @@ monitorTaskStacks();
                 gasResidual2,
                 remainingLiters,
                 lastFlowLmin,
-                (unsigned)ESP.getFreeHeap()
+                (unsigned)ESP.getFreeHeap(),
+                (unsigned long)hbLoop,
+                (unsigned long)hbSensorLoop,
+                (unsigned long)hbLevelTask,
+                (unsigned long)hbDisplayTask
             );
             lastBeat = now;
         }
@@ -2756,6 +2801,9 @@ monitorTaskStacks();
 
     // Web server + DNS captive portal
     serviceWebRequests();
+
+    uint32_t loopElapsedUs = micros() - loopStartUs;
+    if (loopElapsedUs > loopMaxUs) loopMaxUs = loopElapsedUs;
 }
 
 bool initLIS3DH() {

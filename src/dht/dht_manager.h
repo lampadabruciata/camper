@@ -12,6 +12,14 @@ volatile extern float humInt;
 volatile extern float tempExt;
 volatile extern float humExt;
 
+// ============================================================
+// DIAGNOSTICA DHT
+// ============================================================
+// Definite in dht_manager.cpp, accessibili a tutto il progetto.
+volatile extern uint32_t dhtReads;        // numero totale letture tentate
+volatile extern uint32_t dhtReadFailures; // letture fallite (NAN su entrambi i canali)
+volatile extern uint32_t dhtMaxReadUs;    // durata massima singola lettura (µs)
+
 // Inizializzazione sensori DHT (interno ed esterno)
 void initDHT();
 

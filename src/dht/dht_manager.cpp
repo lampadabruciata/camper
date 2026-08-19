@@ -20,6 +20,14 @@ volatile float tempExt = NAN;
 volatile float humExt  = NAN;
 
 // ============================================================
+// DIAGNOSTICA DHT
+// ============================================================
+// Definite qui; dichiarate in dht_manager.h.
+volatile uint32_t dhtReads        = 0;
+volatile uint32_t dhtReadFailures = 0;
+volatile uint32_t dhtMaxReadUs    = 0;
+
+// ============================================================
 // ISTANZE SENSORI FISICI DHT
 // ============================================================
 // Il modulo DHT è proprietario dei sensori fisici.
@@ -58,8 +66,13 @@ void initDHT() {
 // è valida. La logica di aggiornamento (controlli !isnan
 // in DHTTask) resta invariata e aggiorna solo i valori validi.
 bool readDHTExternal(float &temperature, float &humidity) {
+  uint32_t start = micros();
+
   temperature = dhtExt.readTemperature();
   humidity    = dhtExt.readHumidity();
+
+  uint32_t elapsed = micros() - start;
+  if (elapsed > dhtMaxReadUs) dhtMaxReadUs = elapsed;
 
   return !isnan(temperature) || !isnan(humidity);
 }
@@ -73,8 +86,13 @@ bool readDHTExternal(float &temperature, float &humidity) {
 // è valida. La logica di aggiornamento (controlli !isnan
 // in DHTTask) resta invariata e aggiorna solo i valori validi.
 bool readDHTInternal(float &temperature, float &humidity) {
+  uint32_t start = micros();
+
   temperature = dhtInt.readTemperature();
   humidity    = dhtInt.readHumidity();
+
+  uint32_t elapsed = micros() - start;
+  if (elapsed > dhtMaxReadUs) dhtMaxReadUs = elapsed;
 
   return !isnan(temperature) || !isnan(humidity);
 }
@@ -86,15 +104,22 @@ bool readDHTInternal(float &temperature, float &humidity) {
 // variabili globali tempExt/humExt/tempInt/humInt.
 // Mantiene la logica !isnan: aggiorna solo i valori validi.
 void updateDHT() {
+  // Contatore diagnostica: un ciclo completo = 2 letture fisiche
+  dhtReads++;
+
   float tExt, hExt;
-  readDHTExternal(tExt, hExt);
+  bool okExt = readDHTExternal(tExt, hExt);
 
   float tInt, hInt;
-  readDHTInternal(tInt, hInt);
+  bool okInt = readDHTInternal(tInt, hInt);
+
+  // Fallimento = nessuna lettura valida da nessuno dei due sensori
+  if (!okExt && !okInt) {
+    dhtReadFailures++;
+  }
 
   if (!isnan(tExt)) tempExt = tExt;
   if (!isnan(hExt)) humExt = hExt;
   if (!isnan(tInt)) tempInt = tInt;
   if (!isnan(hInt)) humInt = hInt;
 }
-
