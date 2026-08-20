@@ -110,7 +110,6 @@ bool tzIsDST = false;           // true quando è ora legale
 static inline bool serialConnected() {
   return Serial && (Serial.availableForWrite() > 0);
 }
-static inline const char* yesno(bool v) { return v ? "1" : "0"; }
 
 // Macro comode: stampano solo se la seriale è "connessa"
 #define DBG_PRINTLN(...)  do { if (serialConnected()) Serial.println(__VA_ARGS__); } while(0)
@@ -169,9 +168,6 @@ const uint16_t LEVEL_PERIOD_MS = 200;  // 5 Hz
 // Zero (offset) salvati in NVS
 float lvl_roll_zero = 0.0f;    // ° da sottrarre a roll
 float lvl_pitch_zero = 0.0f;   // ° da sottrarre a pitch
-
-float levelPitch = 0;   // milli-g dal sensore
-float levelRoll  = 0;   // milli-g dal sensore
 
 // Soglia "in bolla"
 const float LEVEL_OK_DEG = 0.8f;
@@ -291,21 +287,16 @@ float  voltageSamples[numSamples];
 char timeLabels[numSamples][6];
 int sampleIndex = 0;
 float voltageSum  = 0.0f;
-int   sampleCount = 0;
 uint32_t epochMinutes[numSamples];
 time_t lastSampleMinute = 0;
 
 // ==========  LOG GRAFICO CORRENTE (24h) =================
 float currentSamples[numSamples];
 float currentSum  = 0.0f;
-int   currentCount = 0;
 
 // === LOG GRAFICO CORRENTE SOLARE (24h) ===
 float solarCurrentSamples[numSamples];
 float solarCurrentSum = 0.0f;
-int   solarCurrentCount = 0;
-
-volatile unsigned long lastSampleTime = 0;
 
 int currentHour   = 0;
 int currentMinute = 0;
@@ -356,8 +347,6 @@ struct AhDayHeader {
     uint8_t  month;
     uint8_t  day;
 };
-#define AH_DAY_MAGIC 0x41484441u  // 'AHDA'
-const char *AH_DAY_FILE = "/ah_day.bin";
 
 // ===== SD DEFERRED WRITE SYSTEM =====
 volatile bool sdDeferred = false;
@@ -525,7 +514,6 @@ void LevelTask(void *param);
 // Livella LIS3DH
 bool  initLIS3DH();
 void  updateLevel();                   // lettura + calcolo roll/pitch
-void  appendLevelToJson(JsonDocument &json);
 
 
 // Ah
@@ -536,11 +524,9 @@ void integrateAh(float amps, float dt_hours);
 void handleSetAh();
 void handleSetAhMax();
 void handleSetEff();
-void appendAhToJson(JsonDocument &json);
 
 // ADC / sensori
 float readDifferentialAverage(int n);
-float readBatteryVoltage_singleEnded();
 void  updateCurrentAndVoltage();
 
 // Acqua
@@ -589,18 +575,7 @@ void handleDisplayTimeout() {
 // Interrupt flussometro (deve stare prima di setup)
 void IRAM_ATTR pulseCounter();
 
-// === Utility: numero campioni richiesto via query (?n=) con limiti di sicurezza ===
-// Usa defN come default, e clamp tra minN e maxN (dove maxN = numSamples = 1440)
-static inline int reqNOrDefault(int defN, int minN = 60, int maxN = numSamples) {
-  int n = defN;
-  if (server.hasArg("n")) {
-    int q = server.arg("n").toInt();
-    if (q > 0) n = q;
-  }
-  if (n < minN) n = minN;
-  if (n > maxN) n = maxN;
-  return n;
-}
+
 
 
 
@@ -642,12 +617,7 @@ void IRAM_ATTR pulseCounter() {
 
 }
 
-void appendWaterDataToJson(JsonDocument &json) {
 
-  json["flowLmin"]        = lastFlowLmin;
-  json["totalLiters"]     = totalLitersConsumed;
-  json["remainingLiters"] = remainingLiters;
-}
 
 
 // =======================================================
@@ -1023,12 +993,7 @@ void integrateAh(float amps, float dt_hours) {
 
 }
 
-void appendAhToJson(JsonDocument &json) {
-  json["ahNow"]  = batteryAh_now;
-  json["ahMax"]  = batteryAh_max;
-  json["socPct"] = (batteryAh_max > 0) ? (100.0f * batteryAh_now / batteryAh_max) : 0;
-  json["eff"]    = chargeEfficiency;
-}
+
 
 
 // =======================================================
@@ -2744,6 +2709,69 @@ void monitorTaskStacks() {
   }
 }
 
+// ============================================================
+// FLIGHT RECORDER DIAGNOSTICO PERSISTENTE
+// Salva periodicamente su SD l'ultimo stato del sistema,
+// sovrascrivendo sempre /last_diag.txt (diagnosi post-INT_WDT).
+// Usa il ciclo existente loop() - nessuna task dedicata.
+// ============================================================
+void saveDiagSnapshot() {
+  static unsigned long lastDiagSave = 0;
+
+  // Aggiorna al massimo ogni 60 secondi
+  if (millis() - lastDiagSave < 60000) return;
+  lastDiagSave = millis();
+
+  // Se la SD non è disponibile → skip e continuo
+  if (!initSD()) {
+    Serial.println("[DIAG] save skipped");
+    return;
+  }
+
+  if (sdMutex == NULL) sdMutex = xSemaphoreCreateMutex();
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(500)) != pdTRUE) {
+    Serial.println("[DIAG] save skipped");
+    return;
+  }
+
+  // Sovrascrive sempre il file (last_diag.txt)
+  File f = SD.open("/last_diag.txt", FILE_WRITE);
+  if (!f) {
+    xSemaphoreGive(sdMutex);
+    Serial.println("[DIAG] save skipped");
+    return;
+  }
+
+  f.printf("millis=%lu\n",              (unsigned long)millis());
+  f.printf("heap=%lu\n",                (unsigned long)ESP.getFreeHeap());
+
+  f.printf("hbLoop=%lu\n",              (unsigned long)hbLoop);
+  f.printf("hbSensorLoop=%lu\n",        (unsigned long)hbSensorLoop);
+  f.printf("hbLevelTask=%lu\n",         (unsigned long)hbLevelTask);
+  f.printf("hbDisplayTask=%lu\n",       (unsigned long)hbDisplayTask);
+
+  f.printf("lastLoopMs=%lu\n",          (unsigned long)lastLoopMs);
+  f.printf("lastSensorLoopMs=%lu\n",    (unsigned long)lastSensorLoopMs);
+  f.printf("lastLevelTaskMs=%lu\n",     (unsigned long)lastLevelTaskMs);
+  f.printf("lastDisplayTaskMs=%lu\n",   (unsigned long)lastDisplayTaskMs);
+
+  f.printf("loopMaxUs=%lu\n",           (unsigned long)loopMaxUs);
+  f.printf("sensorLoopMaxUs=%lu\n",     (unsigned long)sensorLoopMaxUs);
+  f.printf("levelTaskMaxUs=%lu\n",      (unsigned long)levelTaskMaxUs);
+  f.printf("displayTaskMaxUs=%lu\n",    (unsigned long)displayTaskMaxUs);
+
+  f.printf("dhtReads=%lu\n",            (unsigned long)dhtReads);
+  f.printf("dhtReadFailures=%lu\n",     (unsigned long)dhtReadFailures);
+  f.printf("dhtMaxReadUs=%lu\n",        (unsigned long)dhtMaxReadUs);
+
+  f.printf("ads_present=%u\n",          adsPresent ? 1 : 0);
+  f.printf("lis_present=%u\n",          lisPresent ? 1 : 0);
+
+  f.close();
+  xSemaphoreGive(sdMutex);
+
+  Serial.println("[DIAG] snapshot saved");
+}
 void loop() {
 
     uint32_t loopStartUs = micros();
@@ -2751,6 +2779,7 @@ void loop() {
     lastLoopMs = millis();
 
 monitorTaskStacks();
+    saveDiagSnapshot();
     
     
     
@@ -2871,13 +2900,7 @@ void updateLevel() {
     levelReady = true;
 }
 
-void appendLevelToJson(JsonDocument &json) {
-  json["levelRoll"]   = lvl_roll;        // ° (destra/sinistra)
-  json["levelPitch"]  = lvl_pitch;       // ° (avanti/indietro)
-  json["levelOk"]     = (fabs(lvl_roll) <= LEVEL_OK_DEG) && (fabs(lvl_pitch) <= LEVEL_OK_DEG);
-  json["levelZeroR"]  = lvl_roll_zero;   // offset roll salvato
-  json["levelZeroP"]  = lvl_pitch_zero;  // offset pitch salvato
-}
+
 
   // =======================================================
   // =====================  OLED DISPLAY  ==================
@@ -2930,12 +2953,6 @@ void appendLevelToJson(JsonDocument &json) {
   }
 
   // Helpers allineamento destro
-  void drawRightText(const char* text, int xRight, int y) {
-    int w = display.getStrWidth(text);
-    display.setCursor(xRight - w, y);
-    display.print(text);
-  }
-
   void drawRightPrintf(int xRight, int y, const char* fmt, ...) {
     char buf[32];
     va_list args;

@@ -751,4 +751,45 @@ Implementata diagnostica avanzata per l'analisi degli INT_WDT:
 
 ---
 
+## # 2026-08-20 - Pulizia di codice morto in main.cpp
+
+### Descrizione
+Completata una prima pulizia di codice morto in `main.cpp`.
+
+### Funzioni rimosse
+- `yesno()`
+- `readBatteryVoltage_singleEnded()`
+- `reqNOrDefault()`
+- `appendWaterDataToJson()`
+- `appendAhToJson()`
+- `appendLevelToJson()`
+- `drawRightText()`
+
+### Variabili globali inutilizzate rimosse
+- `levelPitch`
+- `levelRoll`
+- `sampleCount`
+- `currentCount`
+- `solarCurrentCount`
+- `lastSampleTime`
+
+### Macros / constantes rimosse
+- `AH_DAY_MAGIC`
+- `AH_DAY_FILE`
+
+### Estado
+- **Nessuna modifica funzionale.**
+- **Nessuna modifica a**:
+  - DHT
+  - SensorLoop
+  - diagnostica watchdog
+  - crash logger
+  - storage
+  - web server
+
+### Testes
+- Compilación verificada con éxito.
+
+---
+
 *Fine documento - Questo file è la memoria permanente del progetto e dovrebbe essere aggiornato ad ogni modifica significativa.*
