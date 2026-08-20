@@ -95,9 +95,11 @@ void restoreLitersFromSD() {
 
 
 // ============================================================
-// IMPOSTAZIONE CAPACITÀ SERBATOIO ACQUA
-// Endpoint: /setTank?litri=<liters>   (preferito)
-//           /setTank?val=<liters>     (compatibilità)
+// IMPOSTAZIONE DEI LITRI ATUAL PRESENTI NEL SERBATOIO ACQUA
+// Endpoint: /setTank?litri=<litri>   (preferito)
+//           /setTank?val=<litri>     (compatibilità)
+// Il valore inserito rappresenta i litri ATTUALMENTE presenti.
+// La capacità (tankCapacity) resta invariata.
 // ============================================================
 void handleSetTank() {
   float v;
@@ -111,19 +113,17 @@ void handleSetTank() {
     return;
   }
 
-  if (v < 1) v = 1;  // capacità minima accettabile
+  if (v < 0) v = 0;
+  if (v > tankCapacity) v = tankCapacity;
 
-  // Aggiorna capacità serbatoio
-  tankCapacity = v;
+  remainingLiters = v;
+  totalLitersConsumed = tankCapacity - remainingLiters;
 
-  // Reset litri consumati e aggiorna rimanenti
-  totalLitersConsumed = 0.0f;
-  remainingLiters = tankCapacity;
-
-  // Salva su SD
-  saveLastLitersToSD(0.0f);
+  // Salva su SD i litri consumati (totalLitersConsumed), non 0
+  saveLastLitersToSD(totalLitersConsumed);
 
   server.send(200, "text/plain", "ok");
-  Serial.printf("[WATER] Nuova capacità serbatoio: %.1f L\n", v);
+  Serial.printf("[WATER] Serbatoio: %.1f L / capacita %.1f L (consumati %.1f)\n",
+                remainingLiters, tankCapacity, totalLitersConsumed);
 }
 

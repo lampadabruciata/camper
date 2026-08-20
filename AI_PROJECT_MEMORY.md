@@ -1012,5 +1012,50 @@ handleSetTank() ora accetta:
 - logica serbatoio invariata
 
 ---
+
+## 2026-08-20
+
+### Correzione logica riempimento serbatoio
+
+### Problema
+
+- Il popup chiedeva:
+  "Quanti litri contiene ORA il serbatoio?"
+- Il backend interpretava il valore inserito come nuova capacità del serbatoio.
+- La capacità veniva sovrascritta.
+- La percentuale risultava sempre 100%.
+
+### Analisi
+
+- La grafica era corretta.
+- La formula della percentuale era corretta.
+- Il problema era nella logica di handleSetTank().
+
+### Soluzione
+
+- tankCapacity non viene più modificata.
+- Il valore inserito rappresenta i litri realmente presenti.
+- remainingLiters viene aggiornato con il valore inserito.
+- totalLitersConsumed viene ricalcolato come:
+
+  tankCapacity - remainingLiters
+
+- Viene salvato su SD il valore corretto di totalLitersConsumed.
+
+### Risultato
+
+- 0 L -> 0%
+- 20 L -> 20%
+- 50 L -> 50%
+- 100 L -> 100%
+
+### Test
+
+- verifica reale sul dispositivo
+- grafica corretta
+- litri rimanenti corretti
+- compilazione completata con successo
+
+---
 ---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*
