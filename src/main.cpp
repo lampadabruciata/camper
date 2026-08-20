@@ -2021,6 +2021,10 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     if (fabs(avgSolar) < 0.005f)
         avgSolar = 0.0f;
 
+    // 🔥 Soglia anti-rumore anche sulla media corrente batteria (solo grafico storico)
+    if (fabs(avgI) < 0.01f)
+        avgI = 0.0f;
+
     // ===============================
     // ✅ SCRITTURA NEL BUFFER
     // ===============================

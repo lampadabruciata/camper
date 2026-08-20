@@ -903,4 +903,61 @@ mostravano sostanzialmente la stessa finestra temporale.
 - downsampling backend activo
 
 ---
+## 2026-08-20 - Eliminazione rumore corrente nel grafico storico
+
+### Problema
+
+- Il grafico storico della corrente batteria mostrava piccole barre anche quando la corrente reale era sostanzialmente nulla.
+- Il valore medio del minuto (avgI) veniva salvato nello storico senza una soglia anti-rumore dedicata.
+- Il rumore residuo dell'ADC poteva quindi generare campioni diversi da zero in `currentSamples[]`.
+
+### Analisi
+
+- Esistevano già soglie anti-rumore per:
+  - `amps_raw`
+  - `currentFiltered`
+  - `integrateAh()`
+
+- Esisteva inoltre una soglia analoga per:
+  - `avgSolar`
+
+- Mancava però una soglia sulla media del minuto:
+  - `avgI`
+
+### Soluzione
+
+Soglia aggiunta:
+
+```cpp
+if (fabs(avgI) < 0.01f)
+    avgI = 0.0f;
+```
+
+immediatamente prima della scrittura in:
+
+`currentSamples[]`
+
+### Obiettivi
+
+- eliminare le barre fantasma nel grafico storico
+- mantenere invariata la misura reale
+- non modificare il display live
+- non modificare la logica Ah
+- non modificare storage o formato dati
+
+### Impatto
+
+- grafico storico batteria più pulito
+- display live invariato
+- integrazione Ah invariata
+- batteryAh invariato
+- API live invariata
+
+### Test
+
+- compilazione completata con successo
+- nessun nuovo warning
+- modifica confinata in `src/main.cpp`
+
+---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*
