@@ -96,15 +96,21 @@ void restoreLitersFromSD() {
 
 // ============================================================
 // IMPOSTAZIONE CAPACITÀ SERBATOIO ACQUA
-// Endpoint: /setTank?val=<liters>
+// Endpoint: /setTank?litri=<liters>   (preferito)
+//           /setTank?val=<liters>     (compatibilità)
 // ============================================================
 void handleSetTank() {
-  if (!server.hasArg("val")) {
-    server.send(400, "text/plain", "missing val");
+  float v;
+
+  if (server.hasArg("litri")) {
+    v = server.arg("litri").toFloat();
+  } else if (server.hasArg("val")) {
+    v = server.arg("val").toFloat();
+  } else {
+    server.send(400, "text/plain", "missing litri (or val)");
     return;
   }
 
-  float v = server.arg("val").toFloat();
   if (v < 1) v = 1;  // capacità minima accettabile
 
   // Aggiorna capacità serbatoio

@@ -960,4 +960,57 @@ immediatamente prima della scrittura in:
 - modifica confinata in `src/main.cpp`
 
 ---
+## 2026-08-20 - Correzione comando riempimento serbatoio agua
+
+### Problema
+
+- Il pulsante "Riempimento serbatoio" apriva correttamente il popup.
+- Il valore veniva inserito correttamente.
+- Il frontend inviava:
+
+  /setTank?litri=<valore>
+
+- Il backend però cercava:
+
+  server.arg("val")
+
+### Conseguenza
+
+- risposta HTTP 400
+- messaggio: "missing val"
+- il valore del serbatoio non veniva aggiornato
+
+### Analisi
+
+- endpoint registrato corretamente
+- refresh pagina corretto
+- variabili agua corrette
+- bug dovuto esclusivamente al nome del parametro
+
+### Soluzione
+
+handleSetTank() ora accetta:
+
+- litri (parametro principal)
+- val (retrocompatibilità)
+
+### Comportamento
+
+- /setTank?litri=100 -> 200 OK
+- /setTank?val=100 -> 200 OK
+- /setTank -> 400 Bad Request
+
+### Obiettivi
+
+- ripristinare el pulsante riabilitato correcto
+- mantener compatibilidad con vecchie llamadas
+
+### Test
+
+- compilazione completata con éxito
+- endpoint verificato
+- logica serbatoio invariata
+
+---
+---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*
