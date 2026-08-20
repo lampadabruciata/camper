@@ -56,6 +56,17 @@ extern volatile uint32_t levelTaskMaxUs;
 extern volatile uint32_t displayTaskMaxUs;
 extern volatile uint32_t loopMaxUs;
 
+// Tempi massimi di esecuzione blocchi SensorLoop (µs)
+extern volatile uint32_t updateCurrentAndVoltageMaxUs;
+extern volatile uint32_t readSolarCurrentMaxUs;
+extern volatile uint32_t updateDHTMaxUs;
+extern volatile uint32_t updateGas1MaxUs;
+extern volatile uint32_t updateGas2MaxUs;
+extern volatile uint32_t updateLevelMaxUs;
+extern volatile uint32_t saveAhStateToSDMaxUs;
+extern volatile uint32_t saveAhToSDMaxUs;
+extern volatile uint32_t saveGraphToSDMaxUs;
+
 // Diagnostica DHT
 extern volatile uint32_t dhtReads;
 extern volatile uint32_t dhtReadFailures;

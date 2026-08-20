@@ -792,4 +792,40 @@ Completata una prima pulizia di codice morto in `main.cpp`.
 
 ---
 
-*Fine documento - Questo file è la memoria permanente del progetto e dovrebbe essere aggiornato ad ogni modifica significativa.*
+## 2026-08-20 - Flight recorder mejorado
+
+### Flight recorder mejorado
+
+- Extendido saveDiagSnapshot().
+- Añadidos al archivo /last_diag.txt:
+
+  - rtc=
+  - epoch=
+  - millis=
+  - resetReason=
+
+- rtc usa fecha y hora local cuando están disponibles.
+- epoch usa nowEpoch().
+- resetReason usa esp_reset_reason() con la misma traducción del crash logger.
+
+### Objetivo
+
+- Hacer identificable el momento exacto de la fotografía de diagnóstico.
+- Distinguir los datos del boot actual de los del boot anterior.
+- Mejorar el análisis post-mortem de los INT_WDT.
+
+### Estado
+
+- Ninguna modificación a la lógica de la aplicación.
+- Ninguna modificación a SensorLoop.
+- Ninguna modificación a DHT.
+- Ninguna modificación a los temporizadores.
+- Solo extensión de diagnóstico.
+
+### Test
+
+- Compilación verificada con éxito.
+
+---
+
+*Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*

@@ -185,6 +185,16 @@ void logCrash(const char *reason) {
               " level=" + String((unsigned long)levelTaskMaxUs) +
               " display=" + String((unsigned long)displayTaskMaxUs) + "\n";
 
+  newEvent += "BlockMaxUs: updVolt=" + String((unsigned long)updateCurrentAndVoltageMaxUs) +
+              " solar=" + String((unsigned long)readSolarCurrentMaxUs) +
+              " dht=" + String((unsigned long)updateDHTMaxUs) +
+              " gas1=" + String((unsigned long)updateGas1MaxUs) +
+              " gas2=" + String((unsigned long)updateGas2MaxUs) +
+              " level=" + String((unsigned long)updateLevelMaxUs) +
+              " saveAhState=" + String((unsigned long)saveAhStateToSDMaxUs) +
+              " saveAh=" + String((unsigned long)saveAhToSDMaxUs) +
+              " saveGraph=" + String((unsigned long)saveGraphToSDMaxUs) + "\n";
+
   newEvent += "DHT: reads=" + String((unsigned long)dhtReads) +
               " failures=" + String((unsigned long)dhtReadFailures) +
               " maxReadUs=" + String((unsigned long)dhtMaxReadUs) + "\n";

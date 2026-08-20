@@ -55,6 +55,17 @@ volatile uint32_t levelTaskMaxUs  = 0;
 volatile uint32_t displayTaskMaxUs = 0;
 volatile uint32_t loopMaxUs       = 0;
 
+// === TEMPI MASSIMI BLOCCHI SENSORLOOP (massimo storico, in µs) ===
+volatile uint32_t updateCurrentAndVoltageMaxUs = 0;
+volatile uint32_t readSolarCurrentMaxUs        = 0;
+volatile uint32_t updateDHTMaxUs               = 0;
+volatile uint32_t updateGas1MaxUs              = 0;
+volatile uint32_t updateGas2MaxUs              = 0;
+volatile uint32_t updateLevelMaxUs             = 0;
+volatile uint32_t saveAhStateToSDMaxUs         = 0;
+volatile uint32_t saveAhToSDMaxUs              = 0;
+volatile uint32_t saveGraphToSDMaxUs           = 0;
+
 void i2cRecoverBus(void);  // forward declaration per il recovery I2C
 void DisplayTask(void *param);  // forward declaration
 
@@ -1710,7 +1721,11 @@ void SensorLoop(void *pvParameters) {
         static unsigned long lastDHTUpdate = 0;
         if (now - lastDHTUpdate >= 2000) {
             lastDHTUpdate = now;
+            // [DIAG] misura tempo updateDHT()
+            uint32_t tDHT = micros();
             updateDHT();
+            uint32_t dtDHT = micros() - tDHT;
+            if (dtDHT > updateDHTMaxUs) updateDHTMaxUs = dtDHT;
         }
 
         // ============================================================
@@ -1790,10 +1805,18 @@ void SensorLoop(void *pvParameters) {
 
             // Lettura completa sensori elettrici
             
+            // [DIAG] misura tempo updateCurrentAndVoltage()
+            uint32_t tUpdV = micros();
             updateCurrentAndVoltage();
-            
+            uint32_t dtUpdV = micros() - tUpdV;
+            if (dtUpdV > updateCurrentAndVoltageMaxUs) updateCurrentAndVoltageMaxUs = dtUpdV;
+
             vTaskDelay(2);
+            // [DIAG] misura tempo readSolarCurrent()
+            uint32_t tSolar = micros();
             float rawSolar = readSolarCurrent();
+            uint32_t dtSolar = micros() - tSolar;
+            if (dtSolar > readSolarCurrentMaxUs) readSolarCurrentMaxUs = dtSolar;
 
             solarCurrentFiltered =
                 alphaSolar * solarCurrentFiltered +
@@ -1852,7 +1875,11 @@ void SensorLoop(void *pvParameters) {
             static float lastSavedAh = -999;
             if (fabs(batteryAh_now - lastSavedAh) >= 0.05f) {
                 saveAhNowToPrefs();      // per ora lasciamolo
+                // [DIAG] misura tempo saveAhStateToSD()
+                uint32_t tAhState = micros();
                 saveAhStateToSD();       // nuovo salvataggio SD
+                uint32_t dtAhState = micros() - tAhState;
+                if (dtAhState > saveAhStateToSDMaxUs) saveAhStateToSDMaxUs = dtAhState;
                 lastSavedAh = batteryAh_now;
             }
 
@@ -1878,11 +1905,19 @@ void SensorLoop(void *pvParameters) {
             remainingLiters = tankCapacity - totalLitersConsumed;
 
             // GAS
+            // [DIAG] misura tempo updateGas() bilancia 1
+            uint32_t tGas1 = micros();
             updateGas(scale1, gasInitial1, gasConsumed1, gasResidual1,
                       lastScale1Reading, "/last_gas1.txt", lastGasSave1, forceGasSave1, scale1Ready);
+            uint32_t dtGas1 = micros() - tGas1;
+            if (dtGas1 > updateGas1MaxUs) updateGas1MaxUs = dtGas1;
 
+            // [DIAG] misura tempo updateGas() bilancia 2
+            uint32_t tGas2 = micros();
             updateGas(scale2, gasInitial2, gasConsumed2, gasResidual2,
                       lastScale2Reading, "/last_gas2.txt", lastGasSave2, forceGasSave2, scale2Ready);
+            uint32_t dtGas2 = micros() - tGas2;
+            if (dtGas2 > updateGas2MaxUs) updateGas2MaxUs = dtGas2;
         }
 
 // ============================================================
@@ -1931,7 +1966,11 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     // ✅ reset accumulatori minuto
     ahMinuteDischargeAccum = 0.0f;
     ahMinuteChargeAccum    = 0.0f;
+    // [DIAG] misura tempo saveAhToSD()
+    uint32_t tAhDay = micros();
     saveAhToSD();  // ✅ SALVATAGGIO 1 VOLTA AL MINUTO
+    uint32_t dtAhDay = micros() - tAhDay;
+    if (dtAhDay > saveAhToSDMaxUs) saveAhToSDMaxUs = dtAhDay;
 }
 
 
@@ -2015,7 +2054,11 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     Serial.println("[GRAPH] trigger salvataggio");
 
     if (millis() - lastGraphSave > 300000UL) {
+        // [DIAG] misura tempo saveGraphToSD()
+        uint32_t tGraph = micros();
         saveGraphToSD();
+        uint32_t dtGraph = micros() - tGraph;
+        if (dtGraph > saveGraphToSDMaxUs) saveGraphToSDMaxUs = dtGraph;
         lastGraphSave = millis();
     }
 }
@@ -2160,7 +2203,11 @@ void LevelTask(void *param) {
             }
 
             // ✅ AGGIORNA LIVELLA
+            // [DIAG] misura tempo updateLevel()
+            uint32_t tLevel = micros();
             updateLevel();
+            uint32_t dtLevel = micros() - tLevel;
+            if (dtLevel > updateLevelMaxUs) updateLevelMaxUs = dtLevel;
 
             // ✅ SE NON PRONTO → NON BLOCCARE MAI
             if (!levelReady) {
@@ -2742,8 +2789,37 @@ void saveDiagSnapshot() {
     return;
   }
 
-  f.printf("millis=%lu\n",              (unsigned long)millis());
-  f.printf("heap=%lu\n",                (unsigned long)ESP.getFreeHeap());
+  // ---- Header: tempo + reset reason (alprincipio del file) ----
+  char rtcBuf[32] = "NO_TIME";
+  unsigned long epochVal = 0;
+
+  if (timeValid) {
+    time_t nowUtc = nowEpoch();                    // epoch corrente (UTC)
+    epochVal = (unsigned long)nowUtc;
+    tmElements_t tm;
+    breakTime(nowUtc + (tzOffsetHours * 3600), tm); // ora locale (CET/CEST)
+    snprintf(rtcBuf, sizeof(rtcBuf), "%04d-%02d-%02d %02d:%02d:%02d",
+             tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
+  }
+
+  esp_reset_reason_t rr = esp_reset_reason();
+  const char* rrStr =
+    (rr==ESP_RST_POWERON)?"POWERON":
+    (rr==ESP_RST_EXT)?"EXT_RESET (USB/BTN)":
+    (rr==ESP_RST_SW)?"SW_RESET":
+    (rr==ESP_RST_PANIC)?"PANIC":
+    (rr==ESP_RST_INT_WDT)?"INT_WDT":
+    (rr==ESP_RST_TASK_WDT)?"TASK_WDT":
+    (rr==ESP_RST_WDT)?"WDT":
+    (rr==ESP_RST_DEEPSLEEP)?"DEEPSLEEP_WAKE":
+    (rr==ESP_RST_BROWNOUT)?"BROWNOUT":
+    (rr==ESP_RST_SDIO)?"SDIO":"UNKNOWN";
+
+  f.printf("rtc=%s\n",          rtcBuf);
+  f.printf("epoch=%lu\n",        epochVal);
+  f.printf("millis=%lu\n",       (unsigned long)millis());
+  f.printf("resetReason=%s\n",   rrStr);
+  f.printf("heap=%lu\n",         (unsigned long)ESP.getFreeHeap());
 
   f.printf("hbLoop=%lu\n",              (unsigned long)hbLoop);
   f.printf("hbSensorLoop=%lu\n",        (unsigned long)hbSensorLoop);
@@ -2759,6 +2835,16 @@ void saveDiagSnapshot() {
   f.printf("sensorLoopMaxUs=%lu\n",     (unsigned long)sensorLoopMaxUs);
   f.printf("levelTaskMaxUs=%lu\n",      (unsigned long)levelTaskMaxUs);
   f.printf("displayTaskMaxUs=%lu\n",    (unsigned long)displayTaskMaxUs);
+
+  f.printf("updateCurrentAndVoltageMaxUs=%lu\n", (unsigned long)updateCurrentAndVoltageMaxUs);
+  f.printf("readSolarCurrentMaxUs=%lu\n",        (unsigned long)readSolarCurrentMaxUs);
+  f.printf("updateDHTMaxUs=%lu\n",               (unsigned long)updateDHTMaxUs);
+  f.printf("updateGas1MaxUs=%lu\n",              (unsigned long)updateGas1MaxUs);
+  f.printf("updateGas2MaxUs=%lu\n",              (unsigned long)updateGas2MaxUs);
+  f.printf("updateLevelMaxUs=%lu\n",             (unsigned long)updateLevelMaxUs);
+  f.printf("saveAhStateToSDMaxUs=%lu\n",         (unsigned long)saveAhStateToSDMaxUs);
+  f.printf("saveAhToSDMaxUs=%lu\n",              (unsigned long)saveAhToSDMaxUs);
+  f.printf("saveGraphToSDMaxUs=%lu\n",           (unsigned long)saveGraphToSDMaxUs);
 
   f.printf("dhtReads=%lu\n",            (unsigned long)dhtReads);
   f.printf("dhtReadFailures=%lu\n",     (unsigned long)dhtReadFailures);
