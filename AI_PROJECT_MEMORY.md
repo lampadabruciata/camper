@@ -828,4 +828,79 @@ Completata una prima pulizia di codice morto in `main.cpp`.
 
 ---
 
+---
+
+## 2026-08-20 - Correzione range grafici batteria e solare
+
+### Problema
+
+- I pulsanti **1h**, **6h** e **24h** funzionavano nel frontend.
+- Il frontend inviava correttamente:
+  - n=60
+  - n=360
+  - n=1440
+- I backend:
+  - `handleDataBattery()`
+  - `handleDataSolar()`
+  
+  ignoravano completamente il parametro.
+- Entrambi usavano:
+  - `N = 360`
+
+### Conseguenza
+
+- **1h**
+- **6h**
+- **24h**
+
+mostravano sostanzialmente la stessa finestra temporale.
+
+### Soluzione
+
+- Lettura del parametro `n` dal backend.
+- Introduzione downsampling automatico.
+- Nessuna modifica al frontend.
+- Nessuna modifica al formato JSON.
+- Nessuna modifica allo storage.
+
+### Limiti applicati
+
+**Batteria:**
+- massimo 300 punti
+
+**Solare:**
+- massimo 250 punti
+
+### Motivazione
+
+- evitar JSON troppo grandi
+- evitar aumento dell'heap
+- evitar rallentamenti lato ESP32
+- mantenere compatibilità con `DynamicJsonDocument` esistente
+
+### Resultado
+
+- **1h** ≈ 60 puntos
+- **6h** ≈ 180 puntos
+- **24h** ≈ 240-300 puntos
+
+### Verifiche
+
+- compilazione completada con éxito
+- test browser completado
+- test Network tab completado
+
+### Dimensión respuestas observadas
+
+- n=60  -> circ. 2.1 kB
+- n=360 -> circ. 5.0 kB
+- n=1440 -> circ. 8.5 kB
+
+### Estado
+
+- bug resuelto
+- ventana 24h realmente visualizada
+- downsampling backend activo
+
+---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*

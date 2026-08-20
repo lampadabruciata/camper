@@ -204,9 +204,23 @@ void handleDataAhLive() {
 void handleDataSolar() {
     lastWebActivity = millis();
 
-    const int N = 360;  // valore di default
+    // Finestra richiesta dal frontend: 60 (1h) / 360 (6h) / 1440 (24h)
+    int n = 360;  // default se parametro assente o non valido
+    if (server.hasArg("n")) {
+        n = server.arg("n").toInt();
+        if (n <= 0 || n > 1440) n = 360;
+    }
+
+    // Limite assoluto: MAI piu' di MAX_GRAPH_POINTS punti per grafico.
+    // Verifica DynamicJsonDocument(8000) - ArduinoJson v7, slotSize ~8B:
+    //   300 punti -> 3*300+73 = 973 slot -> 8 pool da 1KB = 8192B > 8000B => overflow (JSON troncato).
+    //   250 punti -> 823 slot        -> 7 pool = 7168B  <= 8000B => sicuro (margine ~10%).
+    const int MAX_GRAPH_POINTS = 250;
+    // step con arrotondamento all'intero superiore (ceil): copre TUTTA la finestra con <= MAX_GRAPH_POINTS punti
+    const int step = (n + MAX_GRAPH_POINTS - 1) / MAX_GRAPH_POINTS;
+
     const int total = 1440;  // numSamples
-    const int start = (sampleIndex - N + total) % total;
+    const int start = (sampleIndex - n + total) % total;
 
     Serial.printf("[MEM] solar JSON: %u\n", ESP.getFreeHeap());
 
@@ -219,9 +233,8 @@ void handleDataSolar() {
     time_t nowMin = nowEpoch() / 60;
 
     int validCount = 0;
-    const int MAX_WEB_POINTS = 300;
 
-    for (int k = 0; k < N && validCount < MAX_WEB_POINTS; k++) {
+    for (int k = 0; k < n && validCount < MAX_GRAPH_POINTS; k += step) {
         int idx = (start + k) % total;
 
         uint32_t ep = epochMinutes[idx];
@@ -269,11 +282,19 @@ void handleDataBattery() {
 
     Serial.println(">>> JSON BUILD START <<<");
 
-    const int N = 360;
-    int step = 1;
-    if (N > 300) {
-        step = (N + 300 - 1) / 300;
+    // Finestra richiesta dal frontend: 60 (1h) / 360 (6h) / 1440 (24h)
+    int n = 360;  // default se parametro assente o non valido
+    if (server.hasArg("n")) {
+        n = server.arg("n").toInt();
+        if (n <= 0 || n > 1440) n = 360;
     }
+
+    // Limite assoluto: MAI piu' di MAX_GRAPH_POINTS punti per grafico.
+    // Verifica DynamicJsonDocument(16000) - ArduinoJson v7, slotSize ~8B:
+    //   300 punti -> 5*300+137 = 1637 slot -> 13 pool da 1KB = 13312B <= 16000B => OK (margine ~17%).
+    const int MAX_GRAPH_POINTS = 300;
+    // step con arrotondamento all'intero superiore (ceil): copre TUTTA la finestra con <= MAX_GRAPH_POINTS punti
+    const int step = (n + MAX_GRAPH_POINTS - 1) / MAX_GRAPH_POINTS;
 
     DynamicJsonDocument json(16000);
 
@@ -284,13 +305,13 @@ void handleDataBattery() {
     JsonArray epoch  = json.createNestedArray("epoch");
 
     const int total = 1440;  // numSamples
-    const int start = (sampleIndex - N + total) % total;
+    const int start = (sampleIndex - n + total) % total;
 
     time_t nowMin = nowEpoch() / 60;
 
     int validCount = 0;
 
-    for (int k = 0; k < N && validCount < 300; k += step) {
+    for (int k = 0; k < n && validCount < MAX_GRAPH_POINTS; k += step) {
         
         
         if ((k % 20) == 0) {
