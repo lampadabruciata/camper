@@ -531,6 +531,7 @@ void  updateLevel();                   // lettura + calcolo roll/pitch
 void restoreAhFromPrefs();
 void saveAhNowToPrefs();
 void saveAhConfigToPrefs();
+void saveAhConfigImmediateToPrefs();   // persistenza immediata (config rare: handleSetAh/handleSetAhMax)
 void integrateAh(float amps, float dt_hours);
 void handleSetAh();
 void handleSetAhMax();
@@ -970,6 +971,25 @@ void saveAhConfigToPrefs() {
   xQueueSend(prefsQueue, &m3, pdMS_TO_TICKS(200));
 }
 
+// 🔒 PERSISTENZA IMMEDIATA (senza debounce)
+// Le operazioni di configurazione (handleSetAh / handleSetAhMax) sono rare:
+// scrivono subito in NVS in modo sincrono, così un riavvio immediato non perde
+// i valori appena impostati. Il normale funzionamento (integrazione Ah) continua
+// invece a usare il canale asincrono con debounce di SAVE_DEBOUNCE_MS nel PrefsTask.
+void saveAhConfigImmediateToPrefs() {
+  if (prefsMutex == NULL) return;
+  if (xSemaphoreTake(prefsMutex, pdMS_TO_TICKS(200)) != pdTRUE) return;
+
+  // Handle locale di Preferences: evita di interferire con il prefsAh longevo del PrefsTask.
+  Preferences p;
+  p.begin("energy", false);
+  p.putFloat("ah_max", batteryAh_max);
+  p.putFloat("ah_now", batteryAh_now);
+  p.end();
+
+  xSemaphoreGive(prefsMutex);
+}
+
 void integrateAh(float amps, float dt_hours) {
 
   if (dt_hours <= 0) return;
@@ -1093,7 +1113,10 @@ void handleSetAh() {
     solarCurrentFiltered = 0;
     STATE_EXIT();
 
-    // ✅ Salva tutto in NVS
+    // ✅ Persistenza IMMEDIATA: evita perdita su riavvio immediato
+    saveAhConfigImmediateToPrefs();
+
+    // ✅ Salva tutto in NVS (canale asincrono con debounce, come da architettura)
     saveAhConfigToPrefs();
 
     // ✅ Reset grafici orari
@@ -1117,6 +1140,10 @@ void handleSetAhMax() {
   if (batteryAh_now > batteryAh_max) batteryAh_now = batteryAh_max;
   STATE_EXIT();
 
+  // ✅ Persistenza IMMEDIATA: salva ah_max e ah_now (già clampato) senza debounce
+  saveAhConfigImmediateToPrefs();
+
+  // ✅ Salva tutto in NVS (canale asincrono con debounce, come da architettura)
   saveAhConfigToPrefs();
   server.send(200, "text/plain", "ok");
 }
@@ -1421,9 +1448,8 @@ if (!adsSolarOk) {
  
  
   // >>> BLOCCO AH #5 — Ripristino Ah
-  if (!restoreAhStateFromSD()) {
-      restoreAhFromPrefs();
-  }
+  restoreAhFromPrefs();      // ✅ SEMPRE: batteryAh_max + chargeEfficiency da NVS
+  restoreAhStateFromSD();    // ✅ batteryAh_now da SD (se disponibile), poi CLAMP
   restoreHourlyAhFromSD();
   restoreAhDayFromSD();
   
@@ -2320,44 +2346,49 @@ void PrefsTask(void *param) {
         uint32_t now = millis();
         if (now - lastSaveTs >= SAVE_DEBOUNCE_MS) {
 
-            
-            // ---- AH NOW ----
+            // 🔒 Serializza con eventuali scritture immediate (handleSetAh/handleSetAhMax)
+            // sullo stesso namespace NVS usando prefsMutex.
+            if (xSemaphoreTake(prefsMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+
+                // ---- AH NOW ----
                 if (!isnan(pendingAhNow)) {
-                prefsAh.putFloat("ah_now", pendingAhNow);
-                pendingAhNow = NAN;
-            }
+                    prefsAh.putFloat("ah_now", pendingAhNow);
+                    pendingAhNow = NAN;
+                }
 
-            // ---- AH MAX ----
-            if (!isnan(pendingAhMax)) {
-                prefsAh.putFloat("ah_max", pendingAhMax);
-                pendingAhMax = NAN;
-            }
+                // ---- AH MAX ----
+                if (!isnan(pendingAhMax)) {
+                    prefsAh.putFloat("ah_max", pendingAhMax);
+                    pendingAhMax = NAN;
+                }
 
-            // ---- Efficienza ----
-            if (!isnan(pendingEff)) {
-                prefsAh.putFloat("eff", pendingEff);
-                pendingEff = NAN;
-            }
+                // ---- Efficienza ----
+                if (!isnan(pendingEff)) {
+                    prefsAh.putFloat("eff", pendingEff);
+                    pendingEff = NAN;
+                }
 
-            // ---- Solar offset ----
-            if (!isnan(pendingSolarOffset)) {
-                prefsSolar.putFloat("offV", pendingSolarOffset);
-                pendingSolarOffset = NAN;
-            }
+                // ---- Solar offset ----
+                if (!isnan(pendingSolarOffset)) {
+                    prefsSolar.putFloat("offV", pendingSolarOffset);
+                    pendingSolarOffset = NAN;
+                }
 
-            // ---- Livella R0 ----
-            if (!isnan(pendingR0)) {
-                prefsLevel.putFloat("r0", pendingR0);
-                pendingR0 = NAN;
-            }
+                // ---- Livella R0 ----
+                if (!isnan(pendingR0)) {
+                    prefsLevel.putFloat("r0", pendingR0);
+                    pendingR0 = NAN;
+                }
 
-            // ---- Livella P0 ----
-            if (!isnan(pendingP0)) {
-                prefsLevel.putFloat("p0", pendingP0);
-                pendingP0 = NAN;
-            }
+                // ---- Livella P0 ----
+                if (!isnan(pendingP0)) {
+                    prefsLevel.putFloat("p0", pendingP0);
+                    pendingP0 = NAN;
+                }
 
-            lastSaveTs = now;
+                xSemaphoreGive(prefsMutex);
+                lastSaveTs = now;
+            }
         }
 
         // ✅ MICRO-SLEEP per evitare starvation + watchdog
@@ -2662,6 +2693,10 @@ bool restoreAhStateFromSD()
         return false;
 
     batteryAh_now = s.ahNow;
+
+    // 🔒 CLAMP ASSOLUTO vs batteryAh_max (già ripristinato da NVS in restoreAhFromPrefs)
+    if (batteryAh_now > batteryAh_max) batteryAh_now = batteryAh_max;
+    if (batteryAh_now < 0)             batteryAh_now = 0;
 
     Serial.printf(
         "AH restored from SD: %.2f Ah  saved %lu sec ago\n",

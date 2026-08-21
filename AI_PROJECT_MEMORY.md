@@ -1057,5 +1057,63 @@ handleSetTank() ora accetta:
 - compilazione completata con successo
 
 ---
+
+## 2026-08-21
+
+### Correzione persistenza immediata configurazione batteria
+
+### Problema
+
+- Dopo "Imposta Ah batterie", i valori venivano aggiornati correttamente in RAM.
+- Se l'ESP32 veniva riavviato entro circa 30 secondi, i nuovi valori andavano persi.
+- Al reboot venivano ripristinati i vecchi valori.
+- Il problema era riproducibile:
+
+  1. Imposta Ah batterie = 20
+  2. SOC = 100%
+  3. Riavvio immediato
+  4. Ritorno ai precedenti 10 Ah e SOC 100%
+
+### Analisi
+
+- handleSetAh() e handleSetAhMax() usavano solo salvataggio differito.
+- La persistenza reale avveniva tramite PrefsTask.
+- PrefsTask utilizza un debounce di 30 secondi.
+- Un reboot prima dello scadere del debounce causava la perdita delle modifiche.
+
+### Soluzione
+
+- Aggiunta persistenza immediata in NVS per:
+  - handleSetAh()
+  - handleSetAhMax()
+
+- Mantenuto invariato il debounce di 30 secondi per il funzionamento normale.
+
+- Introdotta funzione:
+
+  saveAhConfigImmediateToPrefs()
+
+- Aggiunta sincronizzazione tramite prefsMutex.
+
+### Risultato
+
+- I valori configurati sopravvivono anche a un riavvio immediato.
+- Nessuna modifica all'integrazione Ah.
+- Nessuna modifica alla formula SOC.
+- Nessuna modifica al frontend.
+
+### Test
+
+1. Imposta Ah batterie = 20
+2. SOC = 100%
+3. Riavvio immediato
+4. Dopo il reboot:
+   - Capacità = 20 Ah
+   - Ah disponibili = 20 Ah
+   - SOC = 100%
+
+Test superato.
+
+---
 ---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*
