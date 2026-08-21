@@ -1974,6 +1974,10 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     float minuteDischarge = ahMinuteDischargeAccum;
     float minuteCharge    = ahMinuteChargeAccum;
 
+    // ✅ DIAGNOSTICA RUMORE (solo per raccogliere dati, sin filtros ni soglie)
+    // Se imprime SIEMPRE una vez por cada cambio de minuto, incluso si minuteDischarge/minuteCharge son 0.
+    Serial.printf("[AH-NOISE]\nminuteDischarge=%.5f\nminuteCharge=%.5f\n", minuteDischarge, minuteCharge);
+
     // ✅ salvi nei buffer live (se li usi)
     ahMinuteDischarge[minuteIndex] = minuteDischarge;
     ahMinuteCharge[minuteIndex]    = minuteCharge;
