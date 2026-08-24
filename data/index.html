@@ -47,6 +47,24 @@
       white-space:nowrap;
     }
 
+    .boot-badge{
+      width:20px;
+      height:20px;
+      border-radius:50%;
+      background:#2e7d32;          /* 🟢 nessun nuovo reboot */
+      margin-right:12px;           /* badge ancorato all'angolo alto sinistro */
+      cursor:pointer;
+      border:2px solid #333;
+      box-shadow:0 0 6px rgba(46,125,50,.7);
+      flex-shrink:0;
+      transition:background .2s;
+    }
+
+    .boot-badge.warn{
+      background:#d32f2f;          /* 🔴 reboot non ancora visto */
+      box-shadow:0 0 8px rgba(211,47,47,.9);
+    }
+
     .tabs{
       display:flex;
       background:#1f1f1f;
@@ -315,6 +333,7 @@
 
   <!-- APP BAR -->
   <div class="app-bar">
+    <div class="boot-badge" id="bootBadge" onclick="showDiagnostics()" title="Diagnostica Sistema"></div>
     <div class="app-title">Monitoraggio Camper</div>
     <div class="app-clock" id="titleClock">--:--</div>
   </div>
@@ -620,6 +639,35 @@
 
 </div>
 
+<!-- PAGINA DIAGNOSTICA SISTEMA -->
+<div id="page_diagnostica" class="page">
+
+  <div class="card">
+    <h2>Diagnostica Sistema</h2>
+    <div>Boot count: <span id="dgBootCount">--</span></div>
+    <div>Reset reason: <span id="dgResetReason">--</span></div>
+    <div>Uptime: <span id="dgUptime">--</span></div>
+    <div>Heap disponibile: <span id="dgHeap">--</span></div>
+    <div>Data e ora: <span id="dgDateTime">--</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Stato Periferiche</h2>
+    <div>SD: <span id="dgSd">--</span></div>
+    <div>WiFi: <span id="dgWifi">--</span></div>
+    <div>ADS1115: <span id="dgAds">--</span></div>
+    <div>LIS3DH: <span id="dgLis">--</span></div>
+  </div>
+
+  <div class="card">
+    <h2>Ultima informazione dal crash logger</h2>
+    <pre id="dgCrash" style="white-space:pre-wrap;font-size:24px;font-weight:normal;margin-top:10px;">--</pre>
+  </div>
+
+  <button id="markSeenBtn" type="button" onclick="markBootSeen()">✓ Segna come visto</button>
+
+</div>
+
 
 <script>
 
@@ -672,6 +720,9 @@ let ahChargeYesterdayTotal = 0;
 let ahPct = 0;
 let ahPctDrawn = 0;
 let levelFastTimer = null;
+
+// --- Diagnostica reboot (badge app-bar) ---
+let currentBootCount = 0;
 
 /* ===================== TABS ===================== */
 
@@ -1077,6 +1128,11 @@ async function fetchPageData() {
             case "livello":
                 // usa già /level in polling rapido → NON toccare
                 break;
+            case "diagnostica":
+                resp = await fetch("/api/boot", { cache: 'no-store' });
+                window.lastData = await resp.json();
+                updateDiagPage(window.lastData);
+                break;
 
             default:
                 // Home → usa i valori live
@@ -1100,6 +1156,82 @@ function updateLivePage(d){
     document.getElementById("tempExtVal").textContent = d.tempExt.toFixed(1);
     document.getElementById("humIntVal").textContent = d.humInt.toFixed(0);
     document.getElementById("humExtVal").textContent = d.humExt.toFixed(0);
+}
+
+/* ===================== DIAGNOSTICA REBOOT ===================== */
+
+function formatUptime(s) {
+  s = Math.max(0, Math.floor(s || 0));
+  const dd = Math.floor(s / 86400);
+  const hh = String(Math.floor((s % 86400) / 3600)).padStart(2, "0");
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(2, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return (dd > 0 ? dd + "g " : "") + hh + ":" + mm + ":" + ss;
+}
+
+function updateDiagPage(d) {
+  currentBootCount = Number(d.bootCount) || 0;
+
+  document.getElementById("dgBootCount").textContent = currentBootCount;
+  document.getElementById("dgResetReason").textContent = d.resetReason || "--";
+  document.getElementById("dgUptime").textContent = formatUptime(d.uptime);
+  document.getElementById("dgHeap").textContent =
+      Math.round((d.heap || 0) / 1024) + " KB";
+  document.getElementById("dgDateTime").textContent = d.dateTime || "--";
+
+  document.getElementById("dgSd").textContent =
+      d.sdOk ? "OK (SD montata)" : "NON DISPONIBILE";
+  document.getElementById("dgWifi").textContent =
+      "AP attivo (" + (d.wifiClients || 0) + " client)";
+  document.getElementById("dgAds").textContent =
+      d.adsPresent ? "Presente" : "Assente";
+  document.getElementById("dgLis").textContent =
+      d.lisPresent ? "Presente" : "Assente";
+
+  document.getElementById("dgCrash").textContent =
+      (d.lastCrash && d.lastCrash !== "")
+          ? d.lastCrash
+          : "Nessun crash registrato";
+
+  updateBootBadge();
+}
+
+function updateBootBadge() {
+  const el = document.getElementById("bootBadge");
+  if (!el) return;
+  const seen = parseInt(localStorage.getItem("lastSeenBootCount") || "0", 10) || 0;
+  const hasNew = currentBootCount > 0 && currentBootCount > seen;
+  el.classList.toggle("warn", hasNew);
+  el.title = hasNew
+      ? "🔴 Reboot ESP32 non ancora visto (boot #" + currentBootCount + ")"
+      : "🟢 Nessun nuovo reboot (boot #" + currentBootCount + ")";
+}
+
+async function refreshBootBadge() {
+  try {
+    const resp = await fetch("/api/boot", { cache: "no-store" });
+    const d = await resp.json();
+    currentBootCount = Number(d.bootCount) || 0;
+    updateBootBadge();
+  } catch (e) {
+    // mantiene l'ultimo stato noto del badge
+  }
+}
+
+function showDiagnostics() {
+  showPage("diagnostica");
+  refreshBootBadge();
+}
+
+function markBootSeen() {
+  if (currentBootCount > 0) {
+    localStorage.setItem("lastSeenBootCount", String(currentBootCount));
+  }
+  updateBootBadge();
+  const btn = document.getElementById("markSeenBtn");
+  if (btn) {
+    btn.textContent = "✓ Visto (boot #" + currentBootCount + ")";
+  }
 }
 
 
@@ -1278,6 +1410,8 @@ document.addEventListener('visibilitychange', () => {
 window.onload = () => {
   updateTitleClock();
   setInterval(updateTitleClock, 1000);
+  refreshBootBadge();
+  setInterval(refreshBootBadge, 5000);
 
   // 1) Appena carichi la pagina → sincronizza subito
   syncTime();

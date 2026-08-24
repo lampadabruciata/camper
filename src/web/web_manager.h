@@ -31,4 +31,7 @@ void handleDataBattery();
 void handleIndex();
 void handleChartJs();
 
+// Handler diagnostica reboot
+void handleDataBoot();
+
 #endif // WEB_MANAGER_H

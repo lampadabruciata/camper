@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mockup — Diagnostica Reboot</title>
+  <style>
+    :root{ --font-base:22px; --font-big:32px; --font-title:42px; --accent:#00e676; }
+    body{ margin:0; background:#121212; color:#e6e6e6; font-family:Arial,sans-serif; font-size:var(--font-base); }
+    .app-bar{ background:#1f1f1f; color:var(--accent); padding:12px 16px; border-bottom:2px solid #333;
+              display:flex; justify-content:space-between; align-items:center; }
+    .app-title{ font-size:var(--font-title); margin:auto; text-align:center; flex:1; }
+    .app-clock{ font-size:var(--font-big); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .boot-badge{ width:20px; height:20px; border-radius:50%; background:#2e7d32; margin-right:12px; cursor:pointer;
+                 border:2px solid #333; box-shadow:0 0 6px rgba(46,125,50,.7); }
+    .boot-badge.warn{ background:#d32f2f; box-shadow:0 0 8px rgba(211,47,47,.9); }
+    .tabs{ display:flex; background:#1f1f1f; border-bottom:1px solid #333; }
+    .tab{ flex:1; text-align:center; padding:16px 0; cursor:pointer; color:#aaa; }
+    .page{ padding:16px; }
+    .card{ background:#1e1e1e; padding:20px; margin:20px auto; border-radius:12px; max-width:900px; }
+    .card h2{ margin:0 0 10px; font-size:var(--font-title); color:var(--accent); }
+    .card div{ margin:10px 0; font-size:var(--font-big); font-weight:bold; }
+    button{ width:100%; max-width:500px; margin:20px auto; display:block; background:var(--accent);
+            border:none; border-radius:10px; padding:16px; font-size:var(--font-big); color:#000; cursor:pointer; }
+  </style>
+</head>
+<body>
+  <div class="app-bar">
+    <div class="boot-badge warn" id="badge" onclick="toggleState()" title="🔴 Reboot ESP32 non ancora visto (boot #127)"></div>
+    <div class="app-title">Monitoraggio Camper</div>
+    <!-- 🔴 badgel red: boot non ancora visto || 🔴 verde: nessun reboot nuovo -->
+    <div class="app-clock">14:32</div>
+  </div>
+  <div class="tabs">
+    <div class="tab">Batteria</div><div class="tab">Solare</div><div class="tab">Acqua</div>
+    <div class="tab">Gas</div><div class="tab">Temperatura</div><div class="tab">Livello</div>
+  </div>
+
+  <div class="page">
+    <div class="card">
+      <h2>Diagnostica Sistema</h2>
+      <div>Boot count: <span>127</span></div>
+      <div>Reset reason: <span>INT_WDT</span></div>
+      <div>Uptime: <span>0g 03:42:18</span></div>
+      <div>Heap disponibile: <span>128 KB</span></div>
+      <div>Data e ora: <span>2026-08-21 14:32:05</span></div>
+    </div>
+    <div class="card">
+      <h2>Stato Periferiche</h2>
+      <div>SD: <span>OK (SD montata)</span></div>
+      <div>WiFi: <span>AP attivo (1 client)</span></div>
+      <div>ADS1115: <span>Presente</span></div>
+      <div>LIS3DH: <span>Presente</span></div>
+    </div>
+    <div class="card">
+      <h2>Ultima informazione dal crash logger</h2>
+      <pre style="white-space:pre-wrap;font-size:24px;font-weight:normal;margin-top:10px;color:#e6e6e6;">--- CRASH EVENT ---
+Time(ms): 13310
+Clock: 2026-08-21 11:01
+Reason: RESET: INT_WDT
+ResetReason: INT_WDT (2)
+Page: 0 Dim: 0 Excl: 0
+ADS=1 LIS=1 Scale1=1 Scale2=1
+TempInt=23.4 TempExt=18.2 TempESP=41.1
+V=12.63 I=4.21 SolA=2.10</pre>
+    </div>
+    <button type="button">✓ Segna come visto</button>
+  </div>
+
+  <script>
+    const badge = document.getElementById("badge");
+    function toggleState(){
+      const warn = badge.classList.toggle("warn");
+      badge.title = warn
+        ? "🔴 Reboot ESP32 non ancora visto (boot #127)"
+        : "🟢 Nessun nuovo reboot (boot #127)";
+    }
+  </script>
+</body>
+</html>

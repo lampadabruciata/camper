@@ -228,6 +228,27 @@ const float DIV_RATIO = 0.09259f; //partitore resistivo R1 e R2
 Preferences prefs;
 float offset = 0.0f;           // in Ampere equivalenti
 float calibFactor = 1.0f;      // fattore di calibrazione
+
+// ============================================================
+// DIAGNOSTICA REBOOT — BOOT COUNTER PERSISTENTE IN NVS
+// ============================================================
+// Il firmware è fonte di verità solo per bootCount/resetReason/
+// informazioni diagnostiche. Il concetto "già visto" vive nel
+// localStorage del browser e NON viene persistito qui.
+uint32_t bootCount = 0;
+
+void initBootCounter() {
+  Preferences prefsBoot;
+  if (prefsBoot.begin("diag", false)) {
+    bootCount = prefsBoot.getUInt("bootCount", 0) + 1;
+    prefsBoot.putUInt("bootCount", bootCount);
+    prefsBoot.end();
+    Serial.printf("[BOOT] bootCount persistente #%u\n", bootCount);
+  } else {
+    bootCount = 1;
+    Serial.println("[BOOT] NVS non disponibile → bootCount=1");
+  }
+}
 volatile float currentFiltered = 0.0f;  // corrente filtrata per visualizzazione
 const float alphaCurrent = 0.6f;
 
@@ -410,6 +431,11 @@ TaskHandle_t SensorTask;
 // === DISPLAY TASK (nuovo, thread separato) ===
 TaskHandle_t DisplayTaskHandle = NULL;
 volatile bool displayNeedUpdate = false;
+
+// === ALTRE TASK: handle per diagnostica stack (solo lettura) ===
+TaskHandle_t PrefsTaskHandle      = NULL;
+TaskHandle_t SDWatchdogTaskHandle = NULL;
+TaskHandle_t LevelTaskHandle      = NULL;
 
 
 float batteryAh_max = 50.0f;     // Ah totali disponibili (valore iniziale)
@@ -1168,6 +1194,7 @@ void setup() {
 
   Serial.begin(115200);
   delay(300);                 // dà tempo al monitor seriale di aprirsi dopo l'upload
+  initBootCounter();   // contatore boot persistente in NVS (diagnostica reboot)
 
   esp_reset_reason_t rsn = esp_reset_reason();
   const char* rsn_s =
@@ -1193,7 +1220,7 @@ void setup() {
 
   // ✅ Queue e PrefsTask possono nascere ora
   prefsQueue = xQueueCreate(10, sizeof(PrefsMessage));
-  xTaskCreatePinnedToCore(PrefsTask, "PrefsTask", 4096, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(PrefsTask, "PrefsTask", 4096, NULL, 1, &PrefsTaskHandle, 0);
 
   // ---- Crash log su SD in caso di reset anomalo ----
   
@@ -1477,6 +1504,7 @@ if (!adsSolarOk) {
   server.on("/data/gas", handleDataGas);
   server.on("/data/ah24h", handleDataAh24h); 
   server.on("/data/ahLive", handleDataAhLive); 
+  server.on("/api/boot",   handleDataBoot);
   server.on("/manualGas1",  handleManualGas1);
   server.on("/manualGas2",  handleManualGas2);
   server.on("/setTank",     handleSetTank);
@@ -1636,7 +1664,7 @@ server.on("/level", []() {
   
   Serial.println(">>> WebServer STARTED <<<");
   
-  xTaskCreatePinnedToCore(SDWatchdogTask, "SDWatchdog", 2048, NULL, 1, NULL, 0);
+  xTaskCreatePinnedToCore(SDWatchdogTask, "SDWatchdog", 2048, NULL, 1, &SDWatchdogTaskHandle, 0);
 
   // ------------------------
   // Inizializzazione array grafico (24h)
@@ -1678,7 +1706,7 @@ server.on("/level", []() {
   4096,
   NULL,
   4,
-  NULL,
+  &LevelTaskHandle,
   1   // esegui sul Core 1, separato dal SensorLoop
   );
   
@@ -2641,6 +2669,9 @@ bool saveAhStateToSD()
 {
     if (!sdOk) return false;
 
+    if (!takeMutexWarn(sdMutex, 500, "sd"))
+        return false;
+
     AhStateFile s;
     s.magic = AH_STATE_MAGIC;
     s.epoch = nowEpoch();
@@ -2650,7 +2681,10 @@ bool saveAhStateToSD()
     const char *tmp = "/ah_state.tmp";
 
     File f = SD.open(tmp, FILE_WRITE);
-    if (!f) return false;
+    if (!f) {
+        xSemaphoreGive(sdMutex);
+        return false;
+    }
 
     size_t n = f.write((uint8_t *)&s, sizeof(s));
     f.flush();
@@ -2658,6 +2692,7 @@ bool saveAhStateToSD()
 
     if (n != sizeof(s)) {
         SD.remove(tmp);
+        xSemaphoreGive(sdMutex);
         return false;
     }
 
@@ -2665,9 +2700,11 @@ bool saveAhStateToSD()
 
     if (!SD.rename(tmp, AH_STATE_FILE)) {
         SD.remove(tmp);
+        xSemaphoreGive(sdMutex);
         return false;
     }
 
+    xSemaphoreGive(sdMutex);
     return true;
 }
 
@@ -2676,25 +2713,35 @@ bool restoreAhStateFromSD()
 {
     if (!sdOk) return false;
 
-    if (!SD.exists(AH_STATE_FILE))
+    if (!takeMutexWarn(sdMutex, 500, "sd"))
         return false;
+
+    if (!SD.exists(AH_STATE_FILE)) {
+        xSemaphoreGive(sdMutex);
+        return false;
+    }
 
     File f = SD.open(AH_STATE_FILE);
 
-    if (!f)
+    if (!f) {
+        xSemaphoreGive(sdMutex);
         return false;
+    }
 
     AhStateFile s;
 
     if (f.read((uint8_t *)&s, sizeof(s)) != sizeof(s)) {
         f.close();
+        xSemaphoreGive(sdMutex);
         return false;
     }
 
     f.close();
 
-    if (s.magic != AH_STATE_MAGIC)
+    if (s.magic != AH_STATE_MAGIC) {
+        xSemaphoreGive(sdMutex);
         return false;
+    }
 
     batteryAh_now = s.ahNow;
 
@@ -2707,6 +2754,7 @@ bool restoreAhStateFromSD()
         batteryAh_now,
         (unsigned long)(nowEpoch() - s.epoch));
 
+    xSemaphoreGive(sdMutex);
     return true;
 }
 
@@ -2863,6 +2911,14 @@ void saveDiagSnapshot() {
   f.printf("millis=%lu\n",       (unsigned long)millis());
   f.printf("resetReason=%s\n",   rrStr);
   f.printf("heap=%lu\n",         (unsigned long)ESP.getFreeHeap());
+
+  // ---- Stack minima residua dei task (water mark) ----
+  f.printf("stackLoop=%lu\n",       (unsigned long)uxTaskGetStackHighWaterMark(NULL));
+  f.printf("stackSensor=%lu\n",     (unsigned long)(SensorTask ? uxTaskGetStackHighWaterMark(SensorTask) : 0));
+  f.printf("stackDisplay=%lu\n",    (unsigned long)(DisplayTaskHandle ? uxTaskGetStackHighWaterMark(DisplayTaskHandle) : 0));
+  f.printf("stackLevel=%lu\n",      (unsigned long)(LevelTaskHandle ? uxTaskGetStackHighWaterMark(LevelTaskHandle) : 0));
+  f.printf("stackPrefs=%lu\n",      (unsigned long)(PrefsTaskHandle ? uxTaskGetStackHighWaterMark(PrefsTaskHandle) : 0));
+  f.printf("stackSDWatchdog=%lu\n", (unsigned long)(SDWatchdogTaskHandle ? uxTaskGetStackHighWaterMark(SDWatchdogTaskHandle) : 0));
 
   f.printf("hbLoop=%lu\n",              (unsigned long)hbLoop);
   f.printf("hbSensorLoop=%lu\n",        (unsigned long)hbSensorLoop);

@@ -199,6 +199,22 @@ void logCrash(const char *reason) {
               " failures=" + String((unsigned long)dhtReadFailures) +
               " maxReadUs=" + String((unsigned long)dhtMaxReadUs) + "\n";
 
+  // ----------- LAST DIAG SNAPSHOT (/last_diag.txt) -----------
+  // Associe a ogni reboot (INT_WDT) la fotografia del sistema salvata
+  // periodicamente per saveDiagSnapshot() prima del crash.
+  if (SD.exists("/last_diag.txt")) {
+    File d = SD.open("/last_diag.txt", FILE_READ);
+    if (d) {
+      newEvent += "--- LAST DIAG SNAPSHOT ---\n";
+      newEvent += "\n";
+      newEvent += d.readString();
+      if (newEvent[newEvent.length() - 1] != '\n')
+        newEvent += "\n";
+      newEvent += "--------------------------\n";
+      d.close();
+    }
+  }
+
   newEvent += "--------------------\n";
 
   // ----------- SALVA -----------
@@ -287,4 +303,44 @@ void logBoot() {
   }
 
   xSemaphoreGive(sdMutex);
+}
+
+// ============================================================
+// LEGGI L'ULTIMO EVENTO CRASH DAL LOG (per pagina Diagnostica)
+// Lettura limitata alla coda del file per minimizzare l'heap.
+// ============================================================
+String readLastCrashInfo() {
+  if (!initSD()) return String("SD non disponibile");
+
+  if (sdMutex == NULL) sdMutex = xSemaphoreCreateMutex();
+  if (sdMutex == NULL) return String("Mutex SD non disponibile");
+
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300)) != pdTRUE)
+    return String("SD occupata");
+
+  String result = "Nessun crash registrato";
+
+  if (SD.exists("/crashlog.txt")) {
+    File r = SD.open("/crashlog.txt", FILE_READ);
+    if (r) {
+      size_t size = r.size();
+      size_t start = (size > 1600) ? (size - 1600) : 0;
+      r.seek(start);
+      String tailStr = r.readString();
+      r.close();
+
+      int marker = tailStr.lastIndexOf("--- CRASH EVENT ---");
+      if (marker >= 0) {
+        result = tailStr.substring(marker);
+        if (result.length() > 400) result = result.substring(0, 400);
+      } else if (tailStr.length() > 0) {
+        result = "(nessun evento completo recente nel crash log)";
+      }
+    } else {
+      result = "crashlog.txt non apribile";
+    }
+  }
+
+  xSemaphoreGive(sdMutex);
+  return result;
 }

@@ -1,6 +1,10 @@
 #include "web_manager.h"
 #include <SPIFFS.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
+#include <TimeLib.h>
+#include <esp_system.h>
+// readLastCrashInfo() è dichiarata in storage/crash_logger.h
 
 // WebServer esterno (definito in main.cpp)
 extern WebServer server;
@@ -60,7 +64,14 @@ extern float voltageSamples[];
 extern float currentSamples[];
 
 // Funzione esterna per ora corrente
+extern uint32_t bootCount;
+extern bool sdOk;
+extern volatile bool adsPresent;
+extern volatile bool lisPresent;
+extern bool timeValid;
+extern int8_t tzOffsetHours;
 time_t nowEpoch();
+extern String readLastCrashInfo();
 
 void sendFile(const char* path, const char* mime) {
   if (!SPIFFS.exists(path)) {
@@ -388,6 +399,60 @@ void handleDataBattery() {
 }
 
 
+
+// ============================================================
+// DIAGNOSTICA REBOOT — GET /api/boot
+// ============================================================
+
+static const char* resetReasonString(esp_reset_reason_t rr) {
+  switch (rr) {
+    case ESP_RST_POWERON:   return "POWERON";
+    case ESP_RST_EXT:       return "EXT_RESET (USB/BTN)";
+    case ESP_RST_SW:        return "SW_RESET";
+    case ESP_RST_PANIC:     return "PANIC";
+    case ESP_RST_INT_WDT:   return "INT_WDT";
+    case ESP_RST_TASK_WDT:  return "TASK_WDT";
+    case ESP_RST_WDT:       return "WDT";
+    case ESP_RST_DEEPSLEEP: return "DEEPSLEEP_WAKE";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT";
+    case ESP_RST_SDIO:      return "SDIO";
+    default:                return "UNKNOWN";
+  }
+}
+
+// Endpoint minimal di diagnostica reboot. Ritorna i 4 campi base del
+// contratto (bootCount, resetReason, uptime, heap) + informazioni extra
+// per la pagina "Diagnostica Sistema" (un solo endpoint, zero overhead).
+void handleDataBoot() {
+  DynamicJsonDocument json(2048);
+
+  json["bootCount"]   = bootCount;
+  json["resetReason"] = resetReasonString(esp_reset_reason());
+  json["uptime"]      = (unsigned long)(millis() / 1000);
+  json["heap"]        = ESP.getFreeHeap();
+
+  // Data e ora attuale (ora locale CET/CEST, se RTC valido)
+  char dtBuf[24] = "--";
+  if (timeValid) {
+    time_t nowUtc = nowEpoch();
+    tmElements_t tm;
+    breakTime(nowUtc + (tzOffsetHours * 3600), tm);
+    snprintf(dtBuf, sizeof(dtBuf), "%04d-%02d-%02d %02d:%02d:%02d",
+             tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
+  }
+  json["dateTime"]    = dtBuf;
+  json["timeValid"]   = timeValid;
+
+  json["sdOk"]        = sdOk;
+  json["wifiClients"] = WiFi.softAPgetStationNum();
+  json["adsPresent"]  = adsPresent;
+  json["lisPresent"]  = lisPresent;
+  json["lastCrash"]   = readLastCrashInfo();
+
+  String out;
+  serializeJson(json, out);
+  server.send(200, "application/json", out);
+}
 void handleIndex() {
     sendFile("/index.html", "text/html");
 }

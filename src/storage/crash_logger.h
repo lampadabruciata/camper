@@ -80,5 +80,7 @@ void logCrash(const char *reason);
 
 // Log boot su SD (registrazione sempre)
 void logBoot();
+// Ultimo evento crash registrato (per pagina "Diagnostica Sistema")
+String readLastCrashInfo();
 
 #endif // CRASH_LOGGER_H
