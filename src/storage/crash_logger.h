@@ -5,6 +5,14 @@
 #include <SD.h>
 #include <RTClib.h>
 #include <freertos/semphr.h>
+#include <vector>
+
+// Informazioni brevi di un evento crash (para la lista de la página Diagnóstica)
+struct CrashEventInfo {
+  String timestamp;   // Clock del evento (p.ej. "2026-08-24 00:57")
+  String reason;      // Causa breve (p. ej. "RESET: INT_WDT")
+  String resetReason; // ResetReason completo (p. ej. "INT_WDT (2)")
+};
 
 // Variabili esterne necessarie per logCrash
 extern RTC_DS3231 rtc;
@@ -80,7 +88,17 @@ void logCrash(const char *reason);
 
 // Log boot su SD (registrazione sempre)
 void logBoot();
-// Ultimo evento crash registrato (per pagina "Diagnostica Sistema")
-String readLastCrashInfo();
+
+// ----- API diagnostica crash (basadas en crashlog.txt, sin bootCount NVS) -----
+
+// Cuenta cuántos eventos hay en /crash_log.txt (0 si el archivo no existe o vacío)
+int countCrashEvents();
+
+// Devuelve todos los eventos del crash log (más reciente primero) en `out`
+void readAllCrashEvents(std::vector<CrashEventInfo>& out);
+
+// Devuelve el bloque completo sin procesar del evento `index` (0 = más reciente).
+// Cadena vacía si `index` no existe.
+String readCrashEventRaw(int index);
 
 #endif // CRASH_LOGGER_H

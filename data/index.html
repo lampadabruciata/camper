@@ -644,7 +644,7 @@
 
   <div class="card">
     <h2>Diagnostica Sistema</h2>
-    <div>Boot count: <span id="dgBootCount">--</span></div>
+    <div>Riavvii registrati: <span id="dgCrashCount">--</span></div>
     <div>Reset reason: <span id="dgResetReason">--</span></div>
     <div>Uptime: <span id="dgUptime">--</span></div>
     <div>Heap disponibile: <span id="dgHeap">--</span></div>
@@ -660,11 +660,15 @@
   </div>
 
   <div class="card">
-    <h2>Ultima informazione dal crash logger</h2>
-    <pre id="dgCrash" style="white-space:pre-wrap;font-size:24px;font-weight:normal;margin-top:10px;">--</pre>
+    <h2>Crash log</h2>
+    <div id="dgCrashEmpty" style="font-size:24px;color:#888;">Nessun crash registrato</div>
+    <div id="dgCrashList" style="font-size:24px;margin:8px 0 4px 0;"></div>
+    <hr>
+    <div style="font-size:18px;color:#888;">Seleziona un evento per vedere il dettaglio completo:</div>
+    <pre id="dgCrashDetail" style="white-space:pre-wrap;font-size:20px;font-weight:normal;margin-top:10px;">--</pre>
   </div>
 
-  <button id="markSeenBtn" type="button" onclick="markBootSeen()">✓ Segna come visto</button>
+  <button id="markSeenBtn" type="button" onclick="markCrashSeen()">✓ Segna come visto</button>
 
 </div>
 
@@ -722,7 +726,8 @@ let ahPctDrawn = 0;
 let levelFastTimer = null;
 
 // --- Diagnostica reboot (badge app-bar) ---
-let currentBootCount = 0;
+// Il conteggio deriva da /crashlog.txt (N risale a countCrashEvents).
+let currentCrashCount = 0;
 
 /* ===================== TABS ===================== */
 
@@ -1170,9 +1175,9 @@ function formatUptime(s) {
 }
 
 function updateDiagPage(d) {
-  currentBootCount = Number(d.bootCount) || 0;
+  currentCrashCount = Number(d.crashCount) || 0;
 
-  document.getElementById("dgBootCount").textContent = currentBootCount;
+  document.getElementById("dgCrashCount").textContent = currentCrashCount;
   document.getElementById("dgResetReason").textContent = d.resetReason || "--";
   document.getElementById("dgUptime").textContent = formatUptime(d.uptime);
   document.getElementById("dgHeap").textContent =
@@ -1188,30 +1193,95 @@ function updateDiagPage(d) {
   document.getElementById("dgLis").textContent =
       d.lisPresent ? "Presente" : "Assente";
 
-  document.getElementById("dgCrash").textContent =
-      (d.lastCrash && d.lastCrash !== "")
-          ? d.lastCrash
-          : "Nessun crash registrato";
-
+  loadCrashList();
   updateBootBadge();
+}
+
+// --- Lista riavvii da crashlog.txt (più recente → meno recente) ---
+let lastCrashId = -1;
+
+async function loadCrashList() {
+  const listEl = document.getElementById("dgCrashList");
+  if (!listEl) return;
+  try {
+    const resp = await fetch("/api/crash", { cache: "no-store" });
+    const arr = await resp.json();
+    renderCrashList(Array.isArray(arr) ? arr : []);
+  } catch (e) {
+    renderCrashList([]);
+  }
+}
+
+function renderCrashList(arr) {
+  // arr è già ordinata: più recente → più vecchio
+  const listEl = document.getElementById("dgCrashList");
+  const emptyEl = document.getElementById("dgCrashEmpty");
+  const detailEl = document.getElementById("dgCrashDetail");
+  if (!listEl) return;
+
+  listEl.innerHTML = "";
+
+  if (!arr || arr.length === 0) {
+    if (emptyEl) emptyEl.textContent = "Nessun crash registrato";
+    if (detailEl) detailEl.textContent = "--";
+    lastCrashId = -1;
+    return;
+  }
+
+  if (emptyEl) emptyEl.textContent = "";
+
+  const known = {};
+  arr.forEach((ev) => {
+    const line = document.createElement("div");
+    line.className = "crash-item";
+    line.dataset.id = String(ev.id);
+    line.textContent =
+        (ev.timestamp || "?") + "  -  " + (ev.reason || "?");
+    if (ev.resetReason)
+      line.title = "ResetReason: " + ev.resetReason;
+    line.addEventListener("click", () => selectCrash(Number(ev.id)));
+    known[ev.id] = true;
+    listEl.appendChild(line);
+  });
+
+  // Si el dettaglio seleccionado sigue existiendo, no lo svaciamos
+  if (detailEl && lastCrashId >= 0 && !known[lastCrashId]) {
+    detailEl.textContent = "--";
+    lastCrashId = -1;
+  }
+}
+
+async function selectCrash(id) {
+  lastCrashId = Number(id);
+  const detailEl = document.getElementById("dgCrashDetail");
+  if (!detailEl) return;
+  detailEl.textContent = "Caricamento…";
+  try {
+    const resp = await fetch("/api/crashdetail?id=" + encodeURIComponent(id), { cache: "no-store" });
+    const d = await resp.json();
+    detailEl.textContent =
+        (d && d.detail) ? d.detail : "(dettaglio non disponibile)";
+  } catch (e) {
+    detailEl.textContent = "(errore nel caricamento del dettaglio)";
+  }
 }
 
 function updateBootBadge() {
   const el = document.getElementById("bootBadge");
   if (!el) return;
-  const seen = parseInt(localStorage.getItem("lastSeenBootCount") || "0", 10) || 0;
-  const hasNew = currentBootCount > 0 && currentBootCount > seen;
+  const seen = parseInt(localStorage.getItem("lastSeenCrashCount") || "0", 10) || 0;
+  const hasNew = currentCrashCount > 0 && currentCrashCount > seen;
   el.classList.toggle("warn", hasNew);
   el.title = hasNew
-      ? "🔴 Reboot ESP32 non ancora visto (boot #" + currentBootCount + ")"
-      : "🟢 Nessun nuovo reboot (boot #" + currentBootCount + ")";
+      ? "🔴 Reboot ESP32 non ancora visto (#" + currentCrashCount + " riavvii registrati)"
+      : "🟢 Nessun nuovo reboot (#" + currentCrashCount + " riavvii registrati)";
 }
 
 async function refreshBootBadge() {
   try {
     const resp = await fetch("/api/boot", { cache: "no-store" });
     const d = await resp.json();
-    currentBootCount = Number(d.bootCount) || 0;
+    currentCrashCount = Number(d.crashCount) || 0;
     updateBootBadge();
   } catch (e) {
     // mantiene l'ultimo stato noto del badge
@@ -1223,14 +1293,14 @@ function showDiagnostics() {
   refreshBootBadge();
 }
 
-function markBootSeen() {
-  if (currentBootCount > 0) {
-    localStorage.setItem("lastSeenBootCount", String(currentBootCount));
+function markCrashSeen() {
+  if (currentCrashCount > 0) {
+    localStorage.setItem("lastSeenCrashCount", String(currentCrashCount));
   }
   updateBootBadge();
   const btn = document.getElementById("markSeenBtn");
   if (btn) {
-    btn.textContent = "✓ Visto (boot #" + currentBootCount + ")";
+    btn.textContent = "✓ Visto (" + currentCrashCount + " riavvii)";
   }
 }
 

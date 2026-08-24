@@ -4,7 +4,8 @@
 #include <WiFi.h>
 #include <TimeLib.h>
 #include <esp_system.h>
-// readLastCrashInfo() è dichiarata in storage/crash_logger.h
+#include "storage/crash_logger.h"
+#include <vector>
 
 // WebServer esterno (definito in main.cpp)
 extern WebServer server;
@@ -20,8 +21,8 @@ extern float gasResidual1;
 extern float gasResidual2;
 
 // Variabili esterne per handleDataLive (definite in main.cpp)
-extern float vBattery;
-extern float currentFiltered;
+extern volatile float vBattery;
+extern volatile float currentFiltered;
 extern float batteryAh_max;
 extern float batteryAh_now;
 extern volatile float tempInt;
@@ -63,15 +64,13 @@ extern float solAhHourlyYesterday[24];
 extern float voltageSamples[];
 extern float currentSamples[];
 
-// Funzione esterna per ora corrente
-extern uint32_t bootCount;
+// Variabili esterni (definite en main.cpp)
 extern bool sdOk;
 extern volatile bool adsPresent;
 extern volatile bool lisPresent;
 extern bool timeValid;
 extern int8_t tzOffsetHours;
 time_t nowEpoch();
-extern String readLastCrashInfo();
 
 void sendFile(const char* path, const char* mime) {
   if (!SPIFFS.exists(path)) {
@@ -420,13 +419,13 @@ static const char* resetReasonString(esp_reset_reason_t rr) {
   }
 }
 
-// Endpoint minimal di diagnostica reboot. Ritorna i 4 campi base del
-// contratto (bootCount, resetReason, uptime, heap) + informazioni extra
-// per la pagina "Diagnostica Sistema" (un solo endpoint, zero overhead).
+// Endpoint de diagnostica reboot. Devuelve la info de base del sistema.
+// El contador derivado (crashCount) se basa unicamente en /crashlog.txt
+// (sin bootCount NVS).
 void handleDataBoot() {
   DynamicJsonDocument json(2048);
 
-  json["bootCount"]   = bootCount;
+  json["crashCount"]   = countCrashEvents();
   json["resetReason"] = resetReasonString(esp_reset_reason());
   json["uptime"]      = (unsigned long)(millis() / 1000);
   json["heap"]        = ESP.getFreeHeap();
@@ -447,8 +446,50 @@ void handleDataBoot() {
   json["wifiClients"] = WiFi.softAPgetStationNum();
   json["adsPresent"]  = adsPresent;
   json["lisPresent"]  = lisPresent;
-  json["lastCrash"]   = readLastCrashInfo();
 
+  String out;
+  serializeJson(json, out);
+  server.send(200, "application/json", out);
+}
+
+// ============================================================
+// CRASH LOG — GET /api/crash
+// Lista ordinata di tutti gli eventi in /crashlog.txt, dal più
+// recente al più vecchio. Array JSON di {id, timestamp, reason,
+// resetReason}. L'id (0 = più recente) si usa in /api/crashdetail.
+// ============================================================
+void handleDataCrashList() {
+  std::vector<CrashEventInfo> events;
+  readAllCrashEvents(events);
+
+  DynamicJsonDocument json((size_t)events.size() * 96 + 256);
+  JsonArray arr = json.to<JsonArray>();
+  int id = 0;
+  for (auto &e : events) {
+    JsonObject o = arr.createNestedObject();
+    o["id"]          = id++;
+    o["timestamp"]   = e.timestamp;
+    o["reason"]      = e.reason;
+    o["resetReason"] = e.resetReason;
+  }
+
+  String out;
+  serializeJson(json, out);
+  events.clear();
+  server.send(200, "application/json", out);
+}
+
+// ============================================================
+// CRASH DETAIL — GET /api/crashdetail?id=N
+// Devuelve el bloque completo (detalle) de un evento crash.
+// id 0 = más reciente, 1 = siguiente, etc.
+// ============================================================
+void handleDataCrashDetail() {
+  int id = server.hasArg("id") ? server.arg("id").toInt() : -1;
+  String raw = readCrashEventRaw(id);
+
+  DynamicJsonDocument json((size_t)raw.length() * 2 + 128);
+  json["detail"] = raw;
   String out;
   serializeJson(json, out);
   server.send(200, "application/json", out);

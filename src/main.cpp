@@ -230,25 +230,11 @@ float offset = 0.0f;           // in Ampere equivalenti
 float calibFactor = 1.0f;      // fattore di calibrazione
 
 // ============================================================
-// DIAGNOSTICA REBOOT — BOOT COUNTER PERSISTENTE IN NVS
+// DIAGNOSTICA REBOOT — FONTE DI VERITÀ = crashlog.txt
 // ============================================================
-// Il firmware è fonte di verità solo per bootCount/resetReason/
-// informazioni diagnostiche. Il concetto "già visto" vive nel
-// localStorage del browser e NON viene persistito qui.
-uint32_t bootCount = 0;
-
-void initBootCounter() {
-  Preferences prefsBoot;
-  if (prefsBoot.begin("diag", false)) {
-    bootCount = prefsBoot.getUInt("bootCount", 0) + 1;
-    prefsBoot.putUInt("bootCount", bootCount);
-    prefsBoot.end();
-    Serial.printf("[BOOT] bootCount persistente #%u\n", bootCount);
-  } else {
-    bootCount = 1;
-    Serial.println("[BOOT] NVS non disponibile → bootCount=1");
-  }
-}
+// Il contatore di riavvii non usa più l'NVS (bootCount). Deriva
+// esclusivamente dal numero di eventi in /crashlog.txt (crash logger).
+// Il concetto "già visto" vive nel localStorage del browser.
 volatile float currentFiltered = 0.0f;  // corrente filtrata per visualizzazione
 const float alphaCurrent = 0.6f;
 
@@ -1194,7 +1180,6 @@ void setup() {
 
   Serial.begin(115200);
   delay(300);                 // dà tempo al monitor seriale di aprirsi dopo l'upload
-  initBootCounter();   // contatore boot persistente in NVS (diagnostica reboot)
 
   esp_reset_reason_t rsn = esp_reset_reason();
   const char* rsn_s =
@@ -1505,6 +1490,8 @@ if (!adsSolarOk) {
   server.on("/data/ah24h", handleDataAh24h); 
   server.on("/data/ahLive", handleDataAhLive); 
   server.on("/api/boot",   handleDataBoot);
+  server.on("/api/crash",  handleDataCrashList);
+  server.on("/api/crashdetail", handleDataCrashDetail);
   server.on("/manualGas1",  handleManualGas1);
   server.on("/manualGas2",  handleManualGas2);
   server.on("/setTank",     handleSetTank);

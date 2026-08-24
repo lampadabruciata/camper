@@ -6,6 +6,9 @@
 // Numero massimo di log crash salvati
 #define MAX_CRASH_LOGS 20
 
+// Caché crash (definita più avanti in questo file) — forward declaration
+void crashCacheInvalidate();
+
 void logCrash(const char *reason) {
 
   static volatile bool crashLogging = false;
@@ -227,6 +230,9 @@ void logCrash(const char *reason) {
     w.close();
   }
 
+  // Invalida la cache crash (il file è cambiato)
+  crashCacheInvalidate();
+
   xSemaphoreGive(sdMutex);
   crashLogging = false;
 }
@@ -343,4 +349,145 @@ String readLastCrashInfo() {
 
   xSemaphoreGive(sdMutex);
   return result;
+}
+
+// ============================================================
+// API DIAGNOSTICA CRASH — toda la cronología de /crashlog.txt
+// (sin usar bootCount NVS). La página Diagnóstica muestra estos datos.
+// ============================================================
+
+// Lee el archivo completo /crashlog.txt en `out` bajo mutex SD.
+// Devuelve false si SD no disponible/ocupada.
+static bool readCrashLogFile(String &out) {
+  if (!initSD()) return false;
+  if (sdMutex == NULL) sdMutex = xSemaphoreCreateMutex();
+  if (sdMutex == NULL) return false;
+  if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(300)) != pdTRUE) return false;
+
+  out = "";
+  if (SD.exists("/crashlog.txt")) {
+    File r = SD.open("/crashlog.txt", FILE_READ);
+    if (r) {
+      out = r.readString();
+      r.close();
+    }
+  }
+  xSemaphoreGive(sdMutex);
+  return true;
+}
+
+// ============================================================
+// CACHÉ CRASH (livello leggero)
+// ============================================================
+// La pagina Diagnostica fa polling ~1s su /api/boot: senza cache si
+// rileggerebbe /crashlog.txt a ogni richiesta (40KB peggiori casi).
+// Con un TTL di pochi secondi l'I/O SD si riduce drasticamente.
+// La cache si invalida automaticamente a ogni nuovo logCrash().
+static uint32_t crashCacheTtlMs = 0;
+static int      crashCacheCount = 0;
+static std::vector<CrashEventInfo> crashCacheEvents;
+
+static bool crashCacheIsValid() {
+  return crashCacheTtlMs != 0 && (millis() - crashCacheTtlMs) < 3000;
+}
+
+void crashCacheInvalidate() {
+  crashCacheTtlMs = 0;
+  crashCacheCount = 0;
+  crashCacheEvents.clear();
+}
+
+// Legge /crashlog.txt (una volta sola) e riempie conteggio + lista nella cache.
+// Ritorna false se la lettura SD non è riuscita.
+static bool crashCacheRefresh() {
+  String all;
+  if (!readCrashLogFile(all)) return false;
+
+  std::vector<int> starts, ends;
+  int idx = 0;
+  while (true) {
+    int start = all.indexOf("--- CRASH EVENT ---", idx);
+    if (start < 0) break;
+    int end = all.indexOf("--------------------", start);
+    if (end < 0) end = (int)all.length();
+    else end += strlen("--------------------");
+    starts.push_back(start);
+    ends.push_back(end);
+    idx = end;
+  }
+
+  crashCacheCount = (int)starts.size();
+  crashCacheEvents.clear();
+
+  // Reconstruir en orden inverso: out[0] = más reciente
+  for (size_t i = starts.size(); i-- > 0; ) {
+    String ev = all.substring(starts[i], ends[i]);
+    CrashEventInfo info;
+    int p, e;
+    p = ev.indexOf("Clock: ");
+    if (p >= 0) {
+      e = ev.indexOf('\n', p);
+      info.timestamp = ev.substring(p + 7, (e < 0) ? ev.length() : e);
+    }
+    p = ev.indexOf("Reason: ");
+    if (p >= 0) {
+      e = ev.indexOf('\n', p);
+      info.reason = ev.substring(p + 8, (e < 0) ? ev.length() : e);
+    }
+    p = ev.indexOf("ResetReason: ");
+    if (p >= 0) {
+      e = ev.indexOf('\n', p);
+      info.resetReason = ev.substring(p + 13, (e < 0) ? ev.length() : e);
+    }
+    info.timestamp.trim();  // quita espacios residuales
+    info.reason.trim();
+    info.resetReason.trim();
+    crashCacheEvents.push_back(info);
+  }
+
+  crashCacheTtlMs = millis();
+  return true;
+}
+
+// Cuenta eventos presentes en /crashlog.txt (0 = archivo ausente o vacío).
+int countCrashEvents() {
+  if (!crashCacheIsValid()) crashCacheRefresh();
+  return crashCacheCount;
+}
+
+// Rellena `out` con los eventos de la cache (más reciente primero).
+// Cada elemento incluye timestamp, causa breve y reset reason.
+// No incluye el texto completo (para minimizar RAM): el detalle se
+// obtiene bajo demanda con readCrashEventRaw().
+void readAllCrashEvents(std::vector<CrashEventInfo>& out) {
+  out.clear();
+  if (!crashCacheIsValid()) crashCacheRefresh();
+  out = crashCacheEvents;
+}
+
+// Bloque completo sin procesar del evento `index` (0 = más reciente).
+// Cadena vacía si el índice no existe. Este es el detalle completo del crash
+// logger (mismo contenido que se escribe en /crashlog.txt).
+String readCrashEventRaw(int index) {
+  String all;
+  if (!readCrashLogFile(all)) return String("");
+  if (index < 0) return String("");
+
+  std::vector<int> starts, ends;
+  int idx = 0;
+  while (true) {
+    int start = all.indexOf("--- CRASH EVENT ---", idx);
+    if (start < 0) break;
+    int end = all.indexOf("--------------------", start);
+    if (end < 0) end = (int)all.length();
+    else end += strlen("--------------------");
+    starts.push_back(start);
+    ends.push_back(end);
+    idx = end;
+  }
+
+  int n = (int)starts.size();
+  if (index >= n) return String("");
+  int pos = n - 1 - index;  // índice invertido: más reciente = 0
+  return all.substring(starts[pos], ends[pos]);
 }

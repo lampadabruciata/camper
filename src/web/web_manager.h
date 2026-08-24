@@ -34,4 +34,8 @@ void handleChartJs();
 // Handler diagnostica reboot
 void handleDataBoot();
 
+// Handler lista/dettaglio crash log
+void handleDataCrashList();
+void handleDataCrashDetail();
+
 #endif // WEB_MANAGER_H
