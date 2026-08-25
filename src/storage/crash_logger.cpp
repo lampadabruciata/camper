@@ -413,7 +413,7 @@ static int      crashCacheCount = 0;
 static std::vector<CrashEventInfo> crashCacheEvents;
 
 static bool crashCacheIsValid() {
-  return crashCacheTtlMs != 0 && (millis() - crashCacheTtlMs) < 3000;
+  return crashCacheTtlMs != 0 && (millis() - crashCacheTtlMs) < 60000;
 }
 
 void crashCacheInvalidate() {
