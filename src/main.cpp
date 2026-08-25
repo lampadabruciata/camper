@@ -446,6 +446,14 @@ time_t lastHourlyDayEpoch = 0;  // ✅ traccia l'ultima data (epoch) per rollove
 
 // ===== AH ISTOGRAMMI (NUOVO SISTEMA) =====
 
+// >>> DEADBAND ANTI-RUMORE AH (punto unico: tick del minuto) <<<
+// Soglia sotto la quale il minuto NON viene pubblicato in barre/ore/totali.
+// Motivazione: rumore residuo che passa i gate da 10/20 mA genera micro-barre
+// tipiche di 1e-5...3e-4 Ah/min; 0.0005 Ah/min (= 30 mA medi per minuto pieno)
+// sta >=1.6x sopra il peggior rumore e ~1.7x sotto il piu' piccolo carico
+// reale continuo (50 mA -> 8.3e-4 Ah/min). Il SOC non e' influenzato.
+const float AH_MINUTE_DEADBAND_AH = 0.0005f;   // 0,5 mAh/min
+
 // ultimi 60 minuti
 int minuteIndex = 0;
 
@@ -477,6 +485,12 @@ float solAhHourlyYesterday[24];
 // Totali solari
 float solAhTodayTotal_global = 0.0f;
 float solAhYesterdayTotal_global = 0.0f;
+
+// >>> DEADBAND ANTI-RUMORE AH — accumulatore RAW del minuto solare <<<
+// Il solare NON viene più pubblicato per secondo: qui si accumula il RAW,
+// la pubblicazione (istogramma FV / totali) avviene nel tick del minuto
+// attraverso lo stesso deadband usato per Ah consumati/caricati.
+float solAhMinuteAccum = 0.0f;
 
 // =======================================================
 // ============ PROTOTIPI CHE USEREMO DOPO ===============
@@ -1925,12 +1939,13 @@ void SensorLoop(void *pvParameters) {
             }
 
 
-            // Solar
+            // Solar — solo ACCUMULO RAW del minuto (gate esistente 10 mA).
+            // Istogramma FV e totali NON sono più scritti qui: vengono pubblicati
+            // una volta al minuto nel punto unico di aggregazione (deadband
+            // anti-rumore), con lo stesso criterio di Ah consumati/caricati.
 
             if (solarAmps > 0.01f) {
-                solarAhToday += solarAmps / 3600.0f;
-                solAhHourlyToday[currentHour] += solarAmps / 3600.0f;
-                solAhTodayTotal_global += solarAmps / 3600.0f;   // ✅ aggiungi QUESTO
+                solAhMinuteAccum += solarAmps / 3600.0f;
             }
 
             // Acqua
@@ -1985,15 +2000,32 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
 
     lastMinuteEpoch = thisMinuteEpoch;
 
-    // ✅ prendi i valori separati corretti
-    float minuteDischarge = ahMinuteDischargeAccum;
-    float minuteCharge    = ahMinuteChargeAccum;
+    // ✅ prendi i valori separati corretti (RAW, pre-filtro)
+    float minuteDischargeRaw = ahMinuteDischargeAccum;
+    float minuteChargeRaw    = ahMinuteChargeAccum;
 
-    // ✅ DIAGNOSTICA RUMORE (solo per raccogliere dati, sin filtros ni soglie)
-    // Se imprime SIEMPRE una vez por cada cambio de minuto, incluso si minuteDischarge/minuteCharge son 0.
-    Serial.printf("[AH-NOISE]\nminuteDischarge=%.5f\nminuteCharge=%.5f\n", minuteDischarge, minuteCharge);
+    // ✅ DIAGNOSTICA RUMORE (valori RAW prima del deadband)
+    // Si stampa SEMPRE ad ogni cambio di minuto, anche se raw = 0.
+    Serial.printf("[AH-NOISE]\nminuteDischarge=%.5f\nminuteCharge=%.5f\n", minuteDischargeRaw, minuteChargeRaw);
 
-    // ✅ salvi nei buffer live (se li usi)
+    // ============================================================
+    // ✅ DEADBAND ANTI-RUMORE — PUNTO UNICO DI AGGREGAZIONE
+    // I valori sotto AH_MINUTE_DEADBAND_AH NON vengono scritti né
+    // nelle barre da 60 minuti, né negli istogrammi orari, né nei
+    // totali giornalieri. Ore, totali e barre usano la STESSA
+    // variabile filtrata → somma barre = totale visualizzato.
+    // (Il SOC in batteryAh_now NON è toccato: integra a parte.)
+    // ============================================================
+    float minuteDischarge = 0.0f;
+    float minuteCharge    = 0.0f;
+
+    if (minuteDischargeRaw >= AH_MINUTE_DEADBAND_AH)
+        minuteDischarge = minuteDischargeRaw;
+
+    if (minuteChargeRaw >= AH_MINUTE_DEADBAND_AH)
+        minuteCharge = minuteChargeRaw;
+
+    // ✅ salvi nei buffer live (ultimi 60 minuti)
     ahMinuteDischarge[minuteIndex] = minuteDischarge;
     ahMinuteCharge[minuteIndex]    = minuteCharge;
     Serial.printf("MINUTE AH -> DIS: %.5f  CHG: %.5f\n", minuteDischarge, minuteCharge);
@@ -2004,13 +2036,30 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     ahHourlyToday[currentHour]       += minuteDischarge;
     ahChargeHourlyToday[currentHour] += minuteCharge;
     
-    // ✅ accumulo totali giornalieri globali
-    ahTodayTotal_global += minuteDischarge;
+    // ✅ accumulo totali giornalieri globali (stesso valore filtrato → coerenza garantita)
+    ahTodayTotal_global       += minuteDischarge;
     ahChargeTodayTotal_global += minuteCharge;
+
+    // ============================================================
+    // ✅ DEADBAND ANTI-RUMORE anche sul SOLARE ("Ah prodotti")
+    // Stesso criterio e stessa costante: istogramma FV, totale globale
+    // e running total derivano dalla STESSA variabile filtrata →
+    // somma barre = somma ore = totale visualizzato, per costruzione.
+    // ============================================================
+    float minuteSolarRaw = solAhMinuteAccum;
+
+    float minuteSolar = 0.0f;
+    if (minuteSolarRaw >= AH_MINUTE_DEADBAND_AH)
+        minuteSolar = minuteSolarRaw;
+
+    solAhHourlyToday[currentHour] += minuteSolar;
+    solAhTodayTotal_global        += minuteSolar;
+    solarAhToday                  += minuteSolar;   // OLED + JSON "solAhToday"/"solarAhToday"
 
     // ✅ reset accumulatori minuto
     ahMinuteDischargeAccum = 0.0f;
     ahMinuteChargeAccum    = 0.0f;
+    solAhMinuteAccum       = 0.0f;
     // [DIAG] misura tempo saveAhToSD()
     uint32_t tAhDay = micros();
     saveAhToSD();  // ✅ SALVATAGGIO 1 VOLTA AL MINUTO
