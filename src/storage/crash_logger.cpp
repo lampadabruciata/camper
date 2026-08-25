@@ -3,6 +3,14 @@
 #include <esp_system.h>
 #include <vector>
 
+// ---- TEMPO: usa le stesse funzioni di time_manager.cpp ----
+// (utcToLocal/nowEpoch/updateDST) per esprimere l'ora in LOCALE (CET/CEST),
+// esattamente come fanno rtc= in last_diag.txt e dateTime della UI.
+#include <TimeLib.h>
+extern time_t nowEpoch();
+extern time_t utcToLocal(time_t utcEpoch);
+extern void updateDST();
+
 // Numero massimo di log crash salvati
 #define MAX_CRASH_LOGS 20
 
@@ -18,23 +26,31 @@ void logCrash(const char *reason) {
   // ----------- TIME STRING ROBUSTO -----------
   char clockBuf[32] = "UNKNOWN_TIME";
 
-  // ✅ 1) PROVA DIRETTA RTC (NON DIPENDE DA timeValid)
+  // Ora LOCALE (CET/CEST): stessa conversione di rtc= (last_diag) e
+  // dateTime (UI), cioe' utcToLocal() su un epoch UTC.
+  updateDST();   // garantisce tzOffsetHours corretto (anche subito al boot)
+
+  // ✅ 1) Fonte primaria: RTC diretto convertito in locale (non dipende da timeValid)
   if (rtc.begin()) {
     DateTime now = rtc.now();
     if (now.year() >= 2023 && now.year() < 2100) {
+      time_t loc = utcToLocal((time_t)now.unixtime());
+      tmElements_t tm;
+      breakTime(loc, tm);
       snprintf(clockBuf, sizeof(clockBuf),
                "%04d-%02d-%02d %02d:%02d",
-               now.year(), now.month(), now.day(),
-               now.hour(), now.minute());
+               tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute);
     }
   }
 
-  // ✅ 2) FALLBACK: usa tempo derivato (se RTC non pronto)
+  // ✅ 2) FALLBACK: tempo derivato (se RTC non pronto)
   if (strcmp(clockBuf, "UNKNOWN_TIME") == 0 && timeValid) {
+    time_t loc = utcToLocal(nowEpoch());
+    tmElements_t tm;
+    breakTime(loc, tm);
     snprintf(clockBuf, sizeof(clockBuf),
              "%04d-%02d-%02d %02d:%02d",
-             currentYear, currentMonth, currentDay,
-             currentHour, currentMinute);
+             tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute);
   }
 
   // ✅ 3) FALLBACK FINALE
@@ -241,23 +257,32 @@ void logBoot() {
   // ----------- TIME STRING ROBUSTO -----------
   char clockBuf[32] = "UNKNOWN";
 
-  // ✅ 1) PROVA DIRETTA RTC (NON DIPENDE DA timeValid)
+  // ✅ 0) Calcola fuso/DST: a boot updateDST() non è ancora stato eseguito
+  //        da SensorLoop → lo forziamo qui per esprimere l'ora in LOCALE
+  updateDST();
+
+  // Ora LOCALE (CET/CEST): stessa conversione di rtc= e dateTime (UI).
+  // 1) Fonte primaria: RTC diretto convertito in locale
   if (rtc.begin()) {
     DateTime now = rtc.now();
     if (now.year() >= 2023 && now.year() < 2100) {
+      time_t loc = utcToLocal((time_t)now.unixtime());
+      tmElements_t tm;
+      breakTime(loc, tm);
       snprintf(clockBuf, sizeof(clockBuf),
                "%04d-%02d-%02d %02d:%02d:%02d",
-               now.year(), now.month(), now.day(),
-               now.hour(), now.minute(), now.second());
+               tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
     }
   }
 
-  // ✅ 2) FALLBACK: usa tempo derivato (se RTC non pronto)
+  // ✅ 2) FALLBACK: tempo derivato (se RTC non pronto)
   if (strcmp(clockBuf, "UNKNOWN") == 0 && timeValid) {
+    time_t loc = utcToLocal(nowEpoch());
+    tmElements_t tm;
+    breakTime(loc, tm);
     snprintf(clockBuf, sizeof(clockBuf),
              "%04d-%02d-%02d %02d:%02d:%02d",
-             currentYear, currentMonth, currentDay,
-             currentHour, currentMinute, 0);
+             tm.Year + 1970, tm.Month, tm.Day, tm.Hour, tm.Minute, tm.Second);
   }
 
   // ----------- SD INIT -----------
