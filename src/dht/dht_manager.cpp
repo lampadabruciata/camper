@@ -86,6 +86,16 @@ bool readDHTExternal(float &temperature, float &humidity) {
 // è valida. La logica di aggiornamento (controlli !isnan
 // in DHTTask) resta invariata e aggiorna solo i valori validi.
 bool readDHTInternal(float &temperature, float &humidity) {
+  // [DIAG-WDT] DHT interno TEMPORANEAMENTE DISABILITATO per indagine INT_WDT.
+  // Nessuna lettura fisica su GPIO 4. updateDHT() scarta i valori tramite
+  // i consueti controlli isnan: tempInt/humInt conservano l'ultimo valore
+  // valido. PER RIPRISTINARE: rimuovere questo blocco e riattivare (#if 1)
+  // il corpo originale sottostante.
+  temperature = NAN;
+  humidity    = NAN;
+  return false;
+
+#if 0 // [DIAG-WDT] corpo originale sospeso per il test
   uint32_t start = micros();
 
   temperature = dhtInt.readTemperature();
@@ -95,6 +105,7 @@ bool readDHTInternal(float &temperature, float &humidity) {
   if (elapsed > dhtMaxReadUs) dhtMaxReadUs = elapsed;
 
   return !isnan(temperature) || !isnan(humidity);
+#endif // [DIAG-WDT] fine corpo originale sospeso
 }
 
 // ============================================================
