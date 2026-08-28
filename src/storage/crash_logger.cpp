@@ -218,6 +218,26 @@ void logCrash(const char *reason) {
               " failures=" + String((unsigned long)dhtReadFailures) +
               " maxReadUs=" + String((unsigned long)dhtMaxReadUs) + "\n";
 
+  // Telemetria DHT per-canale (solo diagnostica): readEnabled/valid/reads/
+  // failures/failCount/quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec.
+  {
+    const uint32_t nowMs = now;
+    for (int ch = 0; ch < DHT_CHANNEL_COUNT; ch++) {
+      const dhtSensor_t &s = dhtSensors[ch];
+      newEvent += String(dhtChannelLabel((DhtChannel)ch)) +
+                  ": readEnabled=" + String(s.readEnabled ? 1 : 0) +
+                  " valid=" + String(s.valid ? 1 : 0) +
+                  " reads=" + String((unsigned long)s.reads) +
+                  " failures=" + String((unsigned long)s.failures) +
+                  " failCount=" + String((unsigned long)s.failCount) +
+                  " quarantineCount=" + String((unsigned long)s.quarantineCount) +
+                  " quarantinedUntil=" + String((unsigned long)s.quarantinedUntil) +
+                  " maxReadUs=" + String((unsigned long)s.maxReadUs) +
+                  " lastValidMs=" + String((unsigned long)s.lastValidMs) +
+                  " ageSec=" + String((long)dhtAgeSec(s)) + "\n";
+    }
+  }
+
   // ----------- LAST DIAG SNAPSHOT (/last_diag.txt) -----------
   // Associe a ogni reboot (INT_WDT) la fotografia del sistema salvata
   // periodicamente per saveDiagSnapshot() prima del crash.

@@ -426,7 +426,7 @@ static const char* resetReasonString(esp_reset_reason_t rr) {
 // El contador derivado (crashCount) se basa unicamente en /crashlog.txt
 // (sin bootCount NVS).
 void handleDataBoot() {
-  DynamicJsonDocument json(2048);
+  DynamicJsonDocument json(4096);
 
   json["crashCount"]   = countCrashEvents();
   json["resetReason"] = resetReasonString(esp_reset_reason());
@@ -449,6 +449,26 @@ void handleDataBoot() {
   json["wifiClients"] = WiFi.softAPgetStationNum();
   json["adsPresent"]  = adsPresent;
   json["lisPresent"]  = lisPresent;
+
+  // ---- TELEMETRIA DHT PER-CANALE (solo diagnostica) ----
+  // Ogni canale espone readEnabled/valid/reads/failures/failCount/
+  // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec.
+  // NON modifica il formato di /data/live né quello del frontend.
+  JsonObject dht = json.createNestedObject("dht");
+  for (int ch = 0; ch < DHT_CHANNEL_COUNT; ch++) {
+    const dhtSensor_t &s = dhtSensors[ch];
+    JsonObject co = dht.createNestedObject(dhtChannelLabel((DhtChannel)ch));
+    co["readEnabled"]      = s.readEnabled;
+    co["valid"]            = (bool)s.valid;
+    co["reads"]            = s.reads;
+    co["failures"]         = s.failures;
+    co["failCount"]        = s.failCount;
+    co["quarantineCount"]  = s.quarantineCount;
+    co["quarantinedUntil"] = s.quarantinedUntil;
+    co["maxReadUs"]        = s.maxReadUs;
+    co["lastValidMs"]      = s.lastValidMs;
+    co["ageSec"]           = dhtAgeSec(s);
+  }
 
   String out;
   serializeJson(json, out);

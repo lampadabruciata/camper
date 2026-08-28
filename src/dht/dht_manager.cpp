@@ -27,10 +27,11 @@ volatile uint32_t dhtMaxReadUs    = 0;
 //   INT_WDT): readEnabled=false → letture sempre non valide → dopo
 //   DHT_QUARANTINE_ERRORS errori entra in quarantena → fallback "--".
 // Inizializzati nell'ordine dei campi di dhtSensor_t:
-// dht, readEnabled, temperature, humidity, valid, failCount, quarantinedUntil.
+// dht, readEnabled, temperature, humidity, valid, failCount, quarantinedUntil,
+// reads, failures, quarantineCount, maxReadUs, lastValidMs.
 dhtSensor_t dhtSensors[DHT_CHANNEL_COUNT] = {
-  { DHT(AM2301_PIN, DHT21),  true,  NAN, NAN, false, 0, 0 },
-  { DHT(DHT_INT_PIN, DHT21), false, NAN, NAN, false, 0, 0 }
+  { DHT(AM2301_PIN, DHT21),  true,  NAN, NAN, false, 0, 0, 0, 0, 0, 0, 0 },
+  { DHT(DHT_INT_PIN, DHT21), false, NAN, NAN, false, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 // ============================================================
@@ -83,6 +84,7 @@ static bool readSensor(dhtSensor_t &sensor, float &temperature, float &humidity)
 
   uint32_t elapsed = micros() - start;
   if (elapsed > dhtMaxReadUs) dhtMaxReadUs = elapsed;
+  if (elapsed > sensor.maxReadUs) sensor.maxReadUs = elapsed;
 
   return !isnan(temperature) || !isnan(humidity);
 }
@@ -115,14 +117,17 @@ static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
   }
 
   // --- Lettura fisica (solo qui, mai nel percorso critico) ---
+  sensor.reads++;   // telemetria: tentativo di lettura per questo canale
   float t, h;
   bool ok = readSensor(sensor, t, h);
 
   if (!ok) {
     sensor.valid = false;
+    sensor.failures++;   // telemetria: lettura non valida per questo canale
     if (++sensor.failCount >= DHT_QUARANTINE_ERRORS) {
       sensor.failCount        = 0;
       sensor.quarantinedUntil = now;   // inizio periodo di sospensione
+      sensor.quarantineCount++;        // telemetria: ingresso in quarantena
     }
     return;
   }
@@ -131,7 +136,8 @@ static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
   sensor.failCount = 0;
   if (!isnan(t)) sensor.temperature = t;
   if (!isnan(h)) sensor.humidity    = h;
-  sensor.valid = true;
+  sensor.valid      = true;
+  sensor.lastValidMs = now;   // telemetria: timestamp ultima lettura valida
 }
 
 // ============================================================
@@ -155,4 +161,23 @@ void updateDHT() {
       !dhtSensors[DHT_CHANNEL_INTERNAL].valid) {
     dhtReadFailures++;
   }
+}
+
+// ============================================================
+// HELPER TELEMETRIA DHT
+// ============================================================
+// Logica condivisa tra /api/boot, saveDiagSnapshot() e logCrash()
+// per evitare divergenze nel nome e nei campi derivati dei canali.
+
+const char* dhtChannelLabel(DhtChannel ch) {
+  switch (ch) {
+    case DHT_CHANNEL_INTERNAL: return "DHT_INT";
+    case DHT_CHANNEL_EXTERNAL: return "DHT_EXT";
+    default:                   return "DHT_UNKNOWN";
+  }
+}
+
+int32_t dhtAgeSec(const dhtSensor_t &s) {
+  if (!s.valid || s.lastValidMs == 0) return -1;
+  return (int32_t)((millis() - s.lastValidMs) / 1000UL);
 }

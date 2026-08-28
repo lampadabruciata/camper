@@ -22,6 +22,13 @@ typedef struct {
 
   uint32_t failCount;        // errori consecutivi correnti (quarantena)
   uint32_t quarantinedUntil; // millis() di fine quarantena (0 = non in quarantena)
+
+  // ---- Telemetria diagnostica per-canale (solo osservabilità) ----
+  uint32_t reads;           // tentativi di lettura fisica per questo canale
+  uint32_t failures;        // letture non valide cumulative per questo canale
+  uint32_t quarantineCount; // n° di ingressi in quarantena da boot
+  uint32_t maxReadUs;       // durata massima singola lettura (µs)
+  uint32_t lastValidMs;     // millis() dell'ultima lettura valida (0 = mai)
 } dhtSensor_t;
 
 // Canali sensori DHT (indici dell'array dhtSensors[])
@@ -41,6 +48,13 @@ extern dhtSensor_t dhtSensors[DHT_CHANNEL_COUNT];
 volatile extern uint32_t dhtReads;        // numero totale cicli di lettura tentati
 volatile extern uint32_t dhtReadFailures; // cicli falliti (nessun canale valido)
 volatile extern uint32_t dhtMaxReadUs;    // durata massima singola lettura (µs)
+
+// Etichetta diagnostica del canale ("DHT_INT" / "DHT_EXT")
+const char* dhtChannelLabel(DhtChannel ch);
+
+// Telemetria: età dell'ultimo dato valido in secondi (-1 se mai valido).
+// Campo derivato, non memorizzato nel modello dati.
+int32_t dhtAgeSec(const dhtSensor_t &s);
 
 // Inizializzazione sensori DHT (interno ed esterno)
 void initDHT();

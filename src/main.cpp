@@ -2976,6 +2976,24 @@ void saveDiagSnapshot() {
   f.printf("dhtReadFailures=%lu\n",     (unsigned long)dhtReadFailures);
   f.printf("dhtMaxReadUs=%lu\n",        (unsigned long)dhtMaxReadUs);
 
+  // ---- Telemetria DHT per-canale (solo diagnostica) ----
+  // Ogni canale espone readEnabled/valid/reads/failures/failCount/
+  // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec.
+  for (int ch = 0; ch < DHT_CHANNEL_COUNT; ch++) {
+    const dhtSensor_t &s = dhtSensors[ch];
+    const char* p = (ch == DHT_CHANNEL_INTERNAL) ? "dhtInt" : "dhtExt";
+    f.printf("%s_readEnabled=%d\n",       p, s.readEnabled ? 1 : 0);
+    f.printf("%s_valid=%d\n",             p, (int)s.valid);
+    f.printf("%s_reads=%lu\n",            p, (unsigned long)s.reads);
+    f.printf("%s_failures=%lu\n",         p, (unsigned long)s.failures);
+    f.printf("%s_failCount=%lu\n",        p, (unsigned long)s.failCount);
+    f.printf("%s_quarantineCount=%lu\n",  p, (unsigned long)s.quarantineCount);
+    f.printf("%s_quarantinedUntil=%lu\n", p, (unsigned long)s.quarantinedUntil);
+    f.printf("%s_maxReadUs=%lu\n",        p, (unsigned long)s.maxReadUs);
+    f.printf("%s_lastValidMs=%lu\n",      p, (unsigned long)s.lastValidMs);
+    f.printf("%s_ageSec=%ld\n",           p, (long)dhtAgeSec(s));
+  }
+
   f.printf("ads_present=%u\n",          adsPresent ? 1 : 0);
   f.printf("lis_present=%u\n",          lisPresent ? 1 : 0);
 
