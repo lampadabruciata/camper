@@ -665,7 +665,6 @@ void IRAM_ATTR pulseCounter() {
 // SensorLoop: le letture DHT non toccano mai il percorso
 // critico. Periodo 10 s (DHT21 richiede ≥ 2 s tra letture).
 void DHTTask(void *param) {
-  esp_task_wdt_add(NULL);
   for (;;) {
     uint32_t start = micros();
 
