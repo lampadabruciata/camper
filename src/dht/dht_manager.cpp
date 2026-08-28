@@ -31,7 +31,7 @@ volatile uint32_t dhtMaxReadUs    = 0;
 // reads, failures, quarantineCount, maxReadUs, lastValidMs.
 dhtSensor_t dhtSensors[DHT_CHANNEL_COUNT] = {
   { DHT(AM2301_PIN, DHT21),  true,  NAN, NAN, false, 0, 0, 0, 0, 0, 0, 0 },
-  { DHT(DHT_INT_PIN, DHT21), false, NAN, NAN, false, 0, 0, 0, 0, 0, 0, 0 }
+  { DHT(DHT_INT_PIN, DHT21), true,  NAN, NAN, false, 0, 0, 0, 0, 0, 0, 0 }
 };
 
 // ============================================================
