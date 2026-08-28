@@ -250,8 +250,8 @@ const float alphaSolar = 0.6f;   // stesso filtro della corrente batteria
 // ====================== TEMPERATURE =========================
 
 
-// Le istanze fisiche DHT (dhtExt, dhtInt) sono definite in
-// dht_manager.cpp e dichiarate extern in dht_manager.h.
+// Il modello dati unificato dei sensori DHT (dhtSensors[]) è
+// definito in dht_manager.cpp e dichiarato in dht_manager.h.
 
 // =======================================================
 // ===================  GAS (HX711)  =====================
@@ -3223,8 +3223,8 @@ void updateLevel() {
           display.setCursor(xLabel, y);
           display.print("Int");
           display.setFont(u8g2_font_logisoso18_tf);
-          if (dhtIntValid) drawRightPrintf(xRight, y, "%.1f C", tempInt);
-          else             drawRightPrintf(xRight, y, "%s", "-- C");
+          if (dhtSensors[DHT_CHANNEL_INTERNAL].valid) drawRightPrintf(xRight, y, "%.1f C", dhtSensors[DHT_CHANNEL_INTERNAL].temperature);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- C");
 
           // RIGA 5 — TEMP EXT
           y += dy;
@@ -3232,8 +3232,8 @@ void updateLevel() {
           display.setCursor(xLabel, y);
           display.print("Ext");
           display.setFont(u8g2_font_logisoso18_tf);
-          if (dhtExtValid) drawRightPrintf(xRight, y, "%.1f C", tempExt);
-          else             drawRightPrintf(xRight, y, "%s", "-- C");
+          if (dhtSensors[DHT_CHANNEL_EXTERNAL].valid) drawRightPrintf(xRight, y, "%.1f C", dhtSensors[DHT_CHANNEL_EXTERNAL].temperature);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- C");
           break;
         }
 
@@ -3481,13 +3481,13 @@ case 3: {
           display.print("Int");
 
           display.setFont(u8g2_font_logisoso20_tf);
-          if (dhtIntValid) drawRightPrintf(xRight, y, "%.1f C", tempInt);
-          else             drawRightPrintf(xRight, y, "%s", "-- C");
+          if (dhtSensors[DHT_CHANNEL_INTERNAL].valid) drawRightPrintf(xRight, y, "%.1f C", dhtSensors[DHT_CHANNEL_INTERNAL].temperature);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- C");
 
           y += dyHum;
           display.setFont(u8g2_font_8x13_tf);
-          if (dhtIntValid) drawRightPrintf(xRight, y, "%.0f %%", humInt);
-          else             drawRightPrintf(xRight, y, "%s", "-- %");
+          if (dhtSensors[DHT_CHANNEL_INTERNAL].valid) drawRightPrintf(xRight, y, "%.0f %%", dhtSensors[DHT_CHANNEL_INTERNAL].humidity);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- %");
 
           // Esterno
           y += dyTemp;
@@ -3496,13 +3496,13 @@ case 3: {
           display.print("Ext");
 
           display.setFont(u8g2_font_logisoso20_tf);
-          if (dhtExtValid) drawRightPrintf(xRight, y, "%.1f C", tempExt);
-          else             drawRightPrintf(xRight, y, "%s", "-- C");
+          if (dhtSensors[DHT_CHANNEL_EXTERNAL].valid) drawRightPrintf(xRight, y, "%.1f C", dhtSensors[DHT_CHANNEL_EXTERNAL].temperature);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- C");
 
           y += dyHum;
           display.setFont(u8g2_font_8x13_tf);
-          if (dhtExtValid) drawRightPrintf(xRight, y, "%.0f %%", humExt);
-          else             drawRightPrintf(xRight, y, "%s", "-- %");
+          if (dhtSensors[DHT_CHANNEL_EXTERNAL].valid) drawRightPrintf(xRight, y, "%.0f %%", dhtSensors[DHT_CHANNEL_EXTERNAL].humidity);
+          else                                        drawRightPrintf(xRight, y, "%s", "-- %");
           break;
         }
     }

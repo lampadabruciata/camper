@@ -7,6 +7,9 @@
 #include <freertos/semphr.h>
 #include <vector>
 
+// Modello dati unificato DHT (accesso a dhtSensors[] nel crash log)
+#include "../dht/dht_manager.h"
+
 // Informazioni brevi di un evento crash (para la lista de la página Diagnóstica)
 struct CrashEventInfo {
   String timestamp;   // Clock del evento (p.ej. "2026-08-24 00:57")
@@ -31,8 +34,6 @@ extern volatile bool adsPresent;
 extern volatile bool lisPresent;
 extern bool scale1Ready;
 extern bool scale2Ready;
-extern volatile float tempInt;
-extern volatile float tempExt;
 extern volatile float vBattery;
 extern volatile float currentFiltered;
 extern volatile float solarAmps;

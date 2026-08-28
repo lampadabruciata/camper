@@ -5,6 +5,7 @@
 #include <TimeLib.h>
 #include <esp_system.h>
 #include "storage/crash_logger.h"
+#include "dht/dht_manager.h"
 #include <vector>
 
 // WebServer esterno (definito in main.cpp)
@@ -25,12 +26,6 @@ extern volatile float vBattery;
 extern volatile float currentFiltered;
 extern float batteryAh_max;
 extern float batteryAh_now;
-extern volatile float tempInt;
-extern volatile float tempExt;
-extern volatile float humInt;
-extern volatile float humExt;
-extern volatile bool dhtIntValid;
-extern volatile bool dhtExtValid;
 extern int currentHour;
 extern int currentMinute;
 extern float chargeEfficiency;
@@ -133,10 +128,14 @@ void handleDataLive() {
     json["socPct"] = (batteryAh_max > 0 ? 100.0f * batteryAh_now / batteryAh_max : 0);
     // DHT dedicato: se il sensore è assente o in quarantena → null,
     // il frontend mostrerà "--".
-    if (dhtIntValid) json["tempInt"] = tempInt; else json["tempInt"] = nullptr;
-    if (dhtExtValid) json["tempExt"] = tempExt; else json["tempExt"] = nullptr;
-    if (dhtIntValid) json["humInt"]  = humInt;  else json["humInt"]  = nullptr;
-    if (dhtExtValid) json["humExt"]  = humExt;  else json["humExt"]  = nullptr;
+    if (dhtSensors[DHT_CHANNEL_INTERNAL].valid) json["tempInt"] = dhtSensors[DHT_CHANNEL_INTERNAL].temperature;
+    else                                          json["tempInt"] = nullptr;
+    if (dhtSensors[DHT_CHANNEL_EXTERNAL].valid) json["tempExt"] = dhtSensors[DHT_CHANNEL_EXTERNAL].temperature;
+    else                                          json["tempExt"] = nullptr;
+    if (dhtSensors[DHT_CHANNEL_INTERNAL].valid) json["humInt"]  = dhtSensors[DHT_CHANNEL_INTERNAL].humidity;
+    else                                          json["humInt"]  = nullptr;
+    if (dhtSensors[DHT_CHANNEL_EXTERNAL].valid) json["humExt"]  = dhtSensors[DHT_CHANNEL_EXTERNAL].humidity;
+    else                                          json["humExt"]  = nullptr;
 
     // Ora
     char buf[6];

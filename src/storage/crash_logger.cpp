@@ -162,8 +162,8 @@ void logCrash(const char *reason) {
               " Scale1=" + String(scale1Ready) +
               " Scale2=" + String(scale2Ready) + "\n";
 
-  newEvent += "TempInt=" + String(tempInt,1) +
-              " TempExt=" + String(tempExt,1) +
+  newEvent += "TempInt=" + String(dhtSensors[DHT_CHANNEL_INTERNAL].temperature,1) +
+              " TempExt=" + String(dhtSensors[DHT_CHANNEL_EXTERNAL].temperature,1) +
               " TempESP=" + String(tempESP,1) + "\n";
 
   newEvent += "V=" + String(vBattery,2) +
