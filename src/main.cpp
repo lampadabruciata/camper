@@ -72,8 +72,8 @@ void DisplayTask(void *param);  // forward declaration
 #define STATE_ENTER() taskENTER_CRITICAL(&stateMux)
 #define STATE_EXIT()  taskEXIT_CRITICAL(&stateMux)
 
-// === CONFIGURAZIONE TASK DHT (per test diagnostico watchdog) ===
-#define ENABLE_DHT_TASK false  // DISABILITATO: verifica se gli INT_WDT spariscono
+// === CONFIGURAZIONE TASK DHT (task dedicato, bassa priorità) ===
+#define ENABLE_DHT_TASK true   // RIATTIVATO: task dedicato (10 s, prio 1) — nessuna lettura DHT in SensorLoop
 
 // ==== QUEUE PER SCRITTURE NVS (Preferences) ====
 QueueHandle_t prefsQueue;
@@ -659,23 +659,23 @@ void IRAM_ATTR pulseCounter() {
 
 
 // =======================================================
-// ===============  TASK DHT ESTERNO  ====================
+// ===============  TASK DHT DEDICATO  ===================
 // =======================================================
+// Task a bassa priorità (1) sul Core 0, scollegato da
+// SensorLoop: le letture DHT non toccano mai il percorso
+// critico. Periodo 10 s (DHT21 richiede ≥ 2 s tra letture).
 void DHTTask(void *param) {
   esp_task_wdt_add(NULL);
   for (;;) {
     uint32_t start = micros();
 
+    // Aggiorna temp/hum + gestione quarantena per sensore
     updateDHT();
-    uint32_t afterUpdate = micros();
+    uint32_t dt = micros() - start;
+    if (dt > updateDHTMaxUs) updateDHTMaxUs = dt;
 
     esp_task_wdt_reset();
-    vTaskDelay(pdMS_TO_TICKS(2000));  // DHT ≥ 2s tra letture (consigliato)
-
-    DBG_PRINTF(
-      "[DHT] total=%lu us\n",
-      afterUpdate - start
-    );
+    vTaskDelay(pdMS_TO_TICKS(10000));  // periodo 10 s
   }
 }
 
@@ -1711,9 +1711,8 @@ server.on("/level", []() {
   1   // esegui sul Core 1, separato dal SensorLoop
   );
   
-  // Task dedicato al DHT esterno (Core 0, insieme al SensorLoop)
-  
-  #define ENABLE_DHT_TASK false
+  // Task dedicato al DHT (Core 0, priorità 1, periodo 10 s).
+  // Non condivide il percorso critico con SensorLoop.
   #if ENABLE_DHT_TASK
   xTaskCreatePinnedToCore(
     DHTTask,
@@ -1771,17 +1770,9 @@ void SensorLoop(void *pvParameters) {
         }
 
         // ============================================================
-        // DHT — aggiornamento ogni 2 secondi (fuori da freezeSensors)
+        // DHT — gestito SOLO da DHTTask (task dedicato, 10 s, prio 1):
+        // nessuna lettura DHT nel percorso critico di SensorLoop.
         // ============================================================
-        static unsigned long lastDHTUpdate = 0;
-        if (now - lastDHTUpdate >= 2000) {
-            lastDHTUpdate = now;
-            // [DIAG] misura tempo updateDHT()
-            uint32_t tDHT = micros();
-            updateDHT();
-            uint32_t dtDHT = micros() - tDHT;
-            if (dtDHT > updateDHTMaxUs) updateDHTMaxUs = dtDHT;
-        }
 
         // ============================================================
         // LIVELLA EXCLUSIVE MODE (se la pagina /level è aperta)
@@ -3232,7 +3223,8 @@ void updateLevel() {
           display.setCursor(xLabel, y);
           display.print("Int");
           display.setFont(u8g2_font_logisoso18_tf);
-          drawRightPrintf(xRight, y, "%.1f C", tempInt);
+          if (dhtIntValid) drawRightPrintf(xRight, y, "%.1f C", tempInt);
+          else             drawRightPrintf(xRight, y, "%s", "-- C");
 
           // RIGA 5 — TEMP EXT
           y += dy;
@@ -3240,7 +3232,8 @@ void updateLevel() {
           display.setCursor(xLabel, y);
           display.print("Ext");
           display.setFont(u8g2_font_logisoso18_tf);
-          drawRightPrintf(xRight, y, "%.1f C", tempExt);
+          if (dhtExtValid) drawRightPrintf(xRight, y, "%.1f C", tempExt);
+          else             drawRightPrintf(xRight, y, "%s", "-- C");
           break;
         }
 
@@ -3488,11 +3481,13 @@ case 3: {
           display.print("Int");
 
           display.setFont(u8g2_font_logisoso20_tf);
-          drawRightPrintf(xRight, y, "%.1f C", tempInt);
+          if (dhtIntValid) drawRightPrintf(xRight, y, "%.1f C", tempInt);
+          else             drawRightPrintf(xRight, y, "%s", "-- C");
 
           y += dyHum;
           display.setFont(u8g2_font_8x13_tf);
-          drawRightPrintf(xRight, y, "%.0f %%", humInt);
+          if (dhtIntValid) drawRightPrintf(xRight, y, "%.0f %%", humInt);
+          else             drawRightPrintf(xRight, y, "%s", "-- %");
 
           // Esterno
           y += dyTemp;
@@ -3501,11 +3496,13 @@ case 3: {
           display.print("Ext");
 
           display.setFont(u8g2_font_logisoso20_tf);
-          drawRightPrintf(xRight, y, "%.1f C", tempExt);
+          if (dhtExtValid) drawRightPrintf(xRight, y, "%.1f C", tempExt);
+          else             drawRightPrintf(xRight, y, "%s", "-- C");
 
           y += dyHum;
           display.setFont(u8g2_font_8x13_tf);
-          drawRightPrintf(xRight, y, "%.0f %%", humExt);
+          if (dhtExtValid) drawRightPrintf(xRight, y, "%.0f %%", humExt);
+          else             drawRightPrintf(xRight, y, "%s", "-- %");
           break;
         }
     }

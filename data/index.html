@@ -1153,14 +1153,18 @@ async function fetchPageData() {
     scheduleNextFetch();
 }
 
+// Formatta temperatura/umidità: "--" se sensore assente o in quarantena
+function fmtTemp(v){ return (v == null || isNaN(v)) ? "--" : v.toFixed(1); }
+function fmtHum(v){ return (v == null || isNaN(v)) ? "--" : v.toFixed(0); }
+
 function updateLivePage(d){
     document.getElementById("currentVoltage").textContent = d.vBattery.toFixed(2);
     document.getElementById("currentAmps").textContent = d.amps.toFixed(2);
     document.getElementById("socPct").textContent = d.socPct.toFixed(0);
-    document.getElementById("tempIntVal").textContent = d.tempInt.toFixed(1);
-    document.getElementById("tempExtVal").textContent = d.tempExt.toFixed(1);
-    document.getElementById("humIntVal").textContent = d.humInt.toFixed(0);
-    document.getElementById("humExtVal").textContent = d.humExt.toFixed(0);
+    document.getElementById("tempIntVal").textContent = fmtTemp(d.tempInt);
+    document.getElementById("tempExtVal").textContent = fmtTemp(d.tempExt);
+    document.getElementById("humIntVal").textContent = fmtHum(d.humInt);
+    document.getElementById("humExtVal").textContent = fmtHum(d.humExt);
 }
 
 /* ===================== DIAGNOSTICA REBOOT ===================== */

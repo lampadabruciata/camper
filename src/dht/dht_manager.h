@@ -12,6 +12,11 @@ volatile extern float humInt;
 volatile extern float tempExt;
 volatile extern float humExt;
 
+// Stato disponibilità sensori: false se il sensore è assente (NAN),
+// non ancora letto o in quarantena (5 errori consecutivi → 10 min).
+volatile extern bool dhtIntValid;
+volatile extern bool dhtExtValid;
+
 // ============================================================
 // DIAGNOSTICA DHT
 // ============================================================

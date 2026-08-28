@@ -19,6 +19,10 @@ volatile float humInt  = NAN;
 volatile float tempExt = NAN;
 volatile float humExt  = NAN;
 
+// Disponibilità sensori (false = assente, NAN o in quarantena)
+volatile bool dhtIntValid = false;
+volatile bool dhtExtValid = false;
+
 // ============================================================
 // DIAGNOSTICA DHT
 // ============================================================
@@ -109,28 +113,84 @@ bool readDHTInternal(float &temperature, float &humidity) {
 }
 
 // ============================================================
+// QUARANTENA DHT
+// ============================================================
+// Se un sensore produce letture non valide (NAN) per
+// DHT_QUARANTINE_ERRORS cicli consecutivi, le letture fisiche
+// vengono sospese per DHT_QUARANTINE_DURATION_MS (backoff).
+// Allo scadere viene eseguito un nuovo tentativo.
+#define DHT_QUARANTINE_ERRORS      5U                     // 5 errori consecutivi
+#define DHT_QUARANTINE_DURATION_MS (10UL * 60UL * 1000UL) // 10 minuti
+
+typedef struct {
+  uint32_t failCount;        // errori consecutivi correnti
+  uint32_t quarantinedUntil; // millis() di fine quarantena (0 = non in quarantena)
+} dhtQuarantine_t;
+
+static dhtQuarantine_t qExt = {0, 0};
+static dhtQuarantine_t qInt = {0, 0};
+
+// ============================================================
+// AGGIORNAMENTO SINGOLO CANALE DHT (con quarantena)
+// ============================================================
+// - In quarantena: nessuna lettura fisica finché non scade il periodo.
+// - Lettura non valida: incrementa gli errori consecutivi; al 5° errore
+//   avvia la sospensione (backoff 10 minuti).
+// - Lettura valida: azzera gli errori e aggiorna SOLO i valori validi
+//   (conserva l'ultimo valore letto correttamente).
+static void updateDhtChannel(
+    dhtQuarantine_t &q,
+    bool (*readFn)(float &, float &),
+    volatile float &tempOut,
+    volatile float &humOut,
+    volatile bool  &validOut,
+    uint32_t now)
+{
+  // --- Quarantena attiva: nessuna lettura fino alla scadenza ---
+  if (q.quarantinedUntil != 0) {
+    if ((int32_t)(now - q.quarantinedUntil) < 0) return;
+    q.quarantinedUntil = 0;   // scaduta: riprova in questo ciclo
+    q.failCount        = 0;
+  }
+
+  // --- Lettura fisica (solo qui, mai nel percorso critico) ---
+  float t, h;
+  bool ok = readFn(t, h);
+
+  if (!ok) {
+    validOut = false;
+    if (++q.failCount >= DHT_QUARANTINE_ERRORS) {
+      q.failCount        = 0;
+      q.quarantinedUntil = now;   // inizio periodo di sospensione
+    }
+    return;
+  }
+
+  // --- Lettura valida: azzera errori, aggiorna solo valori validi ---
+  q.failCount = 0;
+  if (!isnan(t)) tempOut = t;
+  if (!isnan(h)) humOut = h;
+  validOut = true;
+}
+
+// ============================================================
 // AGGIORNAMENTO TEMPERATURA / UMIDITÀ
 // ============================================================
-// Legge i sensori DHT esterno ed interno e aggiorna le
-// variabili globali tempExt/humExt/tempInt/humInt.
-// Mantiene la logica !isnan: aggiorna solo i valori validi.
+// Eseguito SOLO da DHTTask (task dedicato a bassa priorità,
+// periodo 10 s), mai da SensorLoop: nessuna lettura DHT nel
+// percorso critico.
+// Aggiorna tempExt/humExt/tempInt/humInt mantenendo la logica
+// !isnan (ultimo valore valido).
 void updateDHT() {
   // Contatore diagnostica: un ciclo completo = 2 letture fisiche
   dhtReads++;
+  uint32_t now = millis();
 
-  float tExt, hExt;
-  bool okExt = readDHTExternal(tExt, hExt);
+  updateDhtChannel(qExt, readDHTExternal, tempExt, humExt, dhtExtValid, now);
+  updateDhtChannel(qInt, readDHTInternal, tempInt, humInt, dhtIntValid, now);
 
-  float tInt, hInt;
-  bool okInt = readDHTInternal(tInt, hInt);
-
-  // Fallimento = nessuna lettura valida da nessuno dei due sensori
-  if (!okExt && !okInt) {
+  // Fallimento ciclo = nessun canale con dati utili
+  if (!dhtExtValid && !dhtIntValid) {
     dhtReadFailures++;
   }
-
-  if (!isnan(tExt)) tempExt = tExt;
-  if (!isnan(hExt)) humExt = hExt;
-  if (!isnan(tInt)) tempInt = tInt;
-  if (!isnan(hInt)) humInt = hInt;
 }

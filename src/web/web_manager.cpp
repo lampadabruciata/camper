@@ -29,6 +29,8 @@ extern volatile float tempInt;
 extern volatile float tempExt;
 extern volatile float humInt;
 extern volatile float humExt;
+extern volatile bool dhtIntValid;
+extern volatile bool dhtExtValid;
 extern int currentHour;
 extern int currentMinute;
 extern float chargeEfficiency;
@@ -129,10 +131,12 @@ void handleDataLive() {
     json["vBattery"] = vBattery;
     json["amps"] = currentFiltered;
     json["socPct"] = (batteryAh_max > 0 ? 100.0f * batteryAh_now / batteryAh_max : 0);
-    json["tempInt"] = tempInt;
-    json["tempExt"] = tempExt;
-    json["humInt"]  = humInt;
-    json["humExt"]  = humExt;
+    // DHT dedicato: se il sensore è assente o in quarantena → null,
+    // il frontend mostrerà "--".
+    if (dhtIntValid) json["tempInt"] = tempInt; else json["tempInt"] = nullptr;
+    if (dhtExtValid) json["tempExt"] = tempExt; else json["tempExt"] = nullptr;
+    if (dhtIntValid) json["humInt"]  = humInt;  else json["humInt"]  = nullptr;
+    if (dhtExtValid) json["humExt"]  = humExt;  else json["humExt"]  = nullptr;
 
     // Ora
     char buf[6];
