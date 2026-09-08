@@ -637,6 +637,24 @@
     <div>Umidità: <span id="humExtVal">--</span> %</div>
   </div>
 
+  <h2 style="text-align:center;margin-top:30px">Andamento Temperatura</h2>
+
+  <div class="chart-wrap">
+    <canvas id="climateTempChart"></canvas>
+  </div>
+
+  <h2 style="text-align:center;margin-top:60px">Andamento Umidità</h2>
+
+  <div class="chart-wrap">
+    <canvas id="climateHumChart"></canvas>
+  </div>
+
+  <div class="chart-buttons" id="climateRangeButtons">
+    <button data-climrange="1" class="active" onclick="setClimateRange(1)">1 ora</button>
+    <button data-climrange="6" onclick="setClimateRange(6)">6 ore</button>
+    <button data-climrange="24" onclick="setClimateRange(24)">24 ore</button>
+  </div>
+
 </div>
 
 <!-- PAGINA DIAGNOSTICA SISTEMA -->
@@ -779,6 +797,24 @@ function showPage(name){
       if (Array.isArray(window.lastData.solAhHourlyToday)) {
         updateSolarAhBars(window.lastData.solAhHourlyToday);
       }
+    }
+  }
+
+  if (name === "temperatura") {
+    ensureClimateCharts();
+    fetchClimateData();
+
+    document.querySelectorAll("[data-climrange]").forEach(b =>
+      b.classList.toggle("active", Number(b.getAttribute("data-climrange")) === climateSelectedHours)
+    );
+
+    if (climateTempChart && climateHumChart) {
+      requestAnimationFrame(() => {
+        climateTempChart.resize();
+        climateTempChart.update();
+        climateHumChart.resize();
+        climateHumChart.update();
+      });
     }
   }
 
@@ -980,6 +1016,170 @@ function updateSolarCurrentRange() {
 }
 
 
+
+/* ================= GRAFICI CLIMA 24h (F5) ====================== */
+/* Serie temperatura/umidità interne-esterne da /data/climate.
+   I null ricevuti dal backend RESTANO null (spanGaps:false → linea
+   interrotta sui campioni mancanti). Nessuno zero, nessuna interpolazione,
+   nessun riempimento dei buchi. */
+
+let climateSelectedHours = 1;
+let climateTempChart = null;
+let climateHumChart = null;
+let climateFetchTimer = null;
+
+// Creazione UNA sola volta: le funzioni successive aggiornano SOLO
+// datasets e labels (mai nuova creazione degli oggetti Chart).
+function ensureClimateCharts() {
+  if (climateTempChart && climateHumChart) return;
+
+  const ctxT = document.getElementById("climateTempChart")?.getContext("2d");
+  if (ctxT && !climateTempChart) {
+    climateTempChart = new Chart(ctxT, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Temperatura Interna",
+            data: [],
+            borderColor: "#ff5722",
+            backgroundColor: "rgba(255,87,34,0.15)",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false
+          },
+          {
+            label: "Temperatura Esterna",
+            data: [],
+            borderColor: "#2196f3",
+            backgroundColor: "rgba(33,150,243,0.15)",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+          y: {
+            ticks: { color: "#ccc" },
+            grid: { color: "#333" },
+            title: { display: true, text: "°C", color: "#ccc" }
+          }
+        }
+      }
+    });
+  }
+
+  const ctxH = document.getElementById("climateHumChart")?.getContext("2d");
+  if (ctxH && !climateHumChart) {
+    climateHumChart = new Chart(ctxH, {
+      type: "line",
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: "Umidità Interna",
+            data: [],
+            borderColor: "#ff9800",
+            backgroundColor: "rgba(255,152,0,0.15)",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false
+          },
+          {
+            label: "Umidità Esterna",
+            data: [],
+            borderColor: "#00bcd4",
+            backgroundColor: "rgba(0,188,212,0.15)",
+            fill: false,
+            tension: 0.3,
+            pointRadius: 0,
+            spanGaps: false
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { ticks: { color: "#ccc" }, grid: { color: "#333" } },
+          y: {
+            ticks: { color: "#ccc" },
+            grid: { color: "#333" },
+            title: { display: true, text: "%", color: "#ccc" }
+          }
+        }
+      }
+    });
+  }
+}
+
+// Aggiorna SOLO datasets e labels dei due grafici già creati.
+function updateClimateCharts(d) {
+  const labels = Array.isArray(d.labels) ? d.labels : [];
+  const tInt  = Array.isArray(d.tInt)  ? d.tInt  : [];
+  const tExt  = Array.isArray(d.tExt)  ? d.tExt  : [];
+  const hInt  = Array.isArray(d.hInt)  ? d.hInt  : [];
+  const hExt  = Array.isArray(d.hExt)  ? d.hExt  : [];
+
+  ensureClimateCharts();
+  if (!climateTempChart || !climateHumChart) return;
+
+  climateTempChart.data.labels = labels;
+  climateTempChart.data.datasets[0].data = tInt;
+  climateTempChart.data.datasets[1].data = tExt;
+  climateTempChart.update();
+
+  climateHumChart.data.labels = labels;
+  climateHumChart.data.datasets[0].data = hInt;
+  climateHumChart.data.datasets[1].data = hExt;
+  climateHumChart.update();
+}
+
+// Range 1h/6h/24h → /data/climate?n=60|360|1440 (salvato in localStorage)
+function setClimateRange(h) {
+  climateSelectedHours = h;
+  localStorage.setItem("climateRange", String(h));
+
+  document.querySelectorAll("[data-climrange]").forEach(b =>
+    b.classList.toggle("active", Number(b.getAttribute("data-climrange")) === h)
+  );
+
+  fetchClimateData();
+}
+
+// FETCH /data/climate ogni 15s (SOLO quando la pagina temperatura è aperta).
+// I valori live continuano a usare /data/live (ciclo esistente a 1s).
+async function fetchClimateData() {
+  clearTimeout(climateFetchTimer);
+
+  if (!document.hidden && currentPage === "temperatura") {
+    const n =
+      climateSelectedHours === 1 ? 60 :
+      climateSelectedHours === 6 ? 360 :
+      1440;
+
+    try {
+      const resp = await fetch(`/data/climate?n=${n}`);
+      const d = await resp.json();
+      updateClimateCharts(d);
+    } catch (e) {
+      console.warn("fetchClimateData error:", e);
+    }
+  }
+
+  climateFetchTimer = setTimeout(fetchClimateData, 15000);
+}
 
 /* ---------- GAUGE AH CON LANCETTA (Ah → % input 0–1) ---------- */
 
@@ -1499,6 +1699,9 @@ window.onload = () => {
   
   const savedSolarRange = Number(localStorage.getItem("range_solar")) || 1;  
   setSolarRange(savedSolarRange);
+
+  const savedClimateRange = Number(localStorage.getItem("climateRange")) || 1;
+  setClimateRange(savedClimateRange);
 
 
   // Ridisegna se cambia dimensione finestra
