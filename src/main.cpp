@@ -316,6 +316,23 @@ float currentSum  = 0.0f;
 float solarCurrentSamples[numSamples];
 float solarCurrentSum = 0.0f;
 
+// ========================================================
+// ==========  LOG CLIMA 24h (FASE F1 - RAM SOLO)  ========
+// ========================================================
+// Serie: temperatura interna/esterna, umidità interna/esterna.
+// Finestra: 1440 campioni = 24h a 1 campione/minuto.
+// Dato assente o gap → NAN (float) / 0 (epoch).
+// FASE F1: solo buffer RAM. Niente SD, niente restore:
+// climateRestored resta false per costruzione.
+const int climateSamples = 1440;                  // 24h a 1 campione/min
+float climateTempInt[climateSamples];             // temperatura interna °C
+float climateTempExt[climateSamples];             // temperatura esterna °C
+float climateHumInt[climateSamples];              // umidità interna %
+float climateHumExt[climateSamples];              // umidità esterna %
+uint32_t climateEpochMinutes[climateSamples];     // epoch in minuti UTC (0 = gap)
+int climateSampleIndex = 0;                       // indice corrente buffer circolare
+bool climateRestored = false;                     // F1: nessun restore SD
+
 int currentHour   = 0;
 int currentMinute = 0;
 int currentDay = 1;
@@ -1677,6 +1694,21 @@ server.on("/level", []() {
      epochMinutes[i] = 0;
     }
   }
+
+  // ------------------------
+  // Inizializzazione buffer clima 24h (FASE F1 — RAM SOLO)
+  // ------------------------
+  // Niente SD in questa fase: nessun save, nessun restore.
+  // climateRestored resta false per costruzione.
+  climateRestored = false;
+  climateSampleIndex = 0;
+  for (int i = 0; i < climateSamples; i++) {
+    climateTempInt[i]      = NAN;
+    climateTempExt[i]      = NAN;
+    climateHumInt[i]       = NAN;
+    climateHumExt[i]       = NAN;
+    climateEpochMinutes[i] = 0;
+  }
   
   xTaskCreatePinnedToCore(
     SensorLoop,
@@ -2085,6 +2117,15 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
                 solarCurrentSamples[idx] = 0;
                 strcpy(timeLabels[idx], "--:--");
 
+                // --- CLIMA 24h (F1): buchi reali nello storico ---
+                int cIdx = climateSampleIndex;
+                climateTempInt[cIdx]      = NAN;
+                climateTempExt[cIdx]      = NAN;
+                climateHumInt[cIdx]       = NAN;
+                climateHumExt[cIdx]       = NAN;
+                climateEpochMinutes[cIdx] = 0;
+                climateSampleIndex = (climateSampleIndex + 1) % climateSamples;
+
                 sampleIndex = (sampleIndex + 1) % numSamples;
             }
 
@@ -2133,6 +2174,39 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     currentSum = 0;
     solarCurrentSum = 0;
     accumCount = 0;
+
+    // ============================================================
+    // ✅ CAMPIONAMENTO CLIMA 24h (FASE F1 — RAM, 1 volta/min)
+    // Usa SOLO i dati già letti da DHTTask in dhtSensors[]:
+    // nessuna lettura fisica qui. Se il canale non è valido o un
+    // valore è NAN → scrive NAN (buco reale nello storico).
+    // ============================================================
+    {
+        int cIdx = climateSampleIndex;
+
+        const dhtSensor_t &cliInt = dhtSensors[DHT_CHANNEL_INTERNAL];
+        const dhtSensor_t &cliExt = dhtSensors[DHT_CHANNEL_EXTERNAL];
+
+        bool cliIntOk = cliInt.valid && !isnan(cliInt.temperature) && !isnan(cliInt.humidity);
+        bool cliExtOk = cliExt.valid && !isnan(cliExt.temperature) && !isnan(cliExt.humidity);
+
+        climateTempInt[cIdx] = cliIntOk ? cliInt.temperature : NAN;
+        climateHumInt[cIdx]  = cliIntOk ? cliInt.humidity    : NAN;
+        climateTempExt[cIdx] = cliExtOk ? cliExt.temperature : NAN;
+        climateHumExt[cIdx]  = cliExtOk ? cliExt.humidity    : NAN;
+
+        climateEpochMinutes[cIdx] = nowT / 60;   // epoch in minuti UTC
+
+        // [CLIM] debug temporaneo — 1 riga per minuto (solo quando si scrive)
+        Serial.printf("[CLIM] idx=%d", cIdx);
+        Serial.printf(" tInt=");  if (cliIntOk) Serial.printf("%.1f", cliInt.temperature); else Serial.print("nan");
+        Serial.printf(" tExt=");  if (cliExtOk) Serial.printf("%.1f", cliExt.temperature); else Serial.print("nan");
+        Serial.printf(" hInt=");  if (cliIntOk) Serial.printf("%.0f", cliInt.humidity);    else Serial.print("nan");
+        Serial.printf(" hExt=");  if (cliExtOk) Serial.printf("%.0f", cliExt.humidity);    else Serial.print("nan");
+        Serial.println();
+
+        climateSampleIndex = (climateSampleIndex + 1) % climateSamples;
+    }
 
     // ===============================
     // ✅ SALVATAGGIO SD (come già hai)
