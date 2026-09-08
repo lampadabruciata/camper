@@ -146,6 +146,41 @@
         opacity: 1 !important;
     }
 
+    /* Toggle visibilità serie Climate24h (pillole cliccabili) */
+    .climate-series-toggle {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin: 12px auto 4px auto;
+      max-width: 900px;
+    }
+
+    .climate-series-toggle button {
+      width: auto;
+      max-width: none;
+      margin: 0;
+      padding: 8px 22px;
+      font-size: var(--font-big);
+      border: 2px solid #555;
+      border-radius: 999px;
+      background: #262626;
+      color: #999;
+      cursor: pointer;
+      opacity: 0.45;              /* stato inattivo: grigio e opacizzato */
+      filter: grayscale(1);
+      transition: background .2s, opacity .2s;
+    }
+
+    .climate-series-toggle button.active {
+      background: var(--series-color, var(--accent));   /* stato attivo: colore della serie, pieno */
+      border-color: var(--series-color, var(--accent));
+      color: #fff;
+      font-weight: bold;
+      opacity: 1;
+      filter: none;
+      box-shadow: 0 0 8px var(--series-color, var(--accent));
+    }
+
 
     .chart-wrap{
       width:100%;
@@ -639,11 +674,21 @@
 
   <h2 style="text-align:center;margin-top:30px">Andamento Temperatura</h2>
 
+  <div class="climate-series-toggle" id="climateTempToggle">
+    <button data-climseries="temp:int" class="active" style="--series-color:#ff5722" onclick="toggleClimateSeries('temp','int')">Interna</button>
+    <button data-climseries="temp:ext" class="active" style="--series-color:#2196f3" onclick="toggleClimateSeries('temp','ext')">Esterna</button>
+  </div>
+
   <div class="chart-wrap">
     <canvas id="climateTempChart"></canvas>
   </div>
 
   <h2 style="text-align:center;margin-top:60px">Andamento Umidità</h2>
+
+  <div class="climate-series-toggle" id="climateHumToggle">
+    <button data-climseries="hum:int" class="active" style="--series-color:#ff9800" onclick="toggleClimateSeries('hum','int')">Interna</button>
+    <button data-climseries="hum:ext" class="active" style="--series-color:#00bcd4" onclick="toggleClimateSeries('hum','ext')">Esterna</button>
+  </div>
 
   <div class="chart-wrap">
     <canvas id="climateHumChart"></canvas>
@@ -1028,6 +1073,28 @@ let climateTempChart = null;
 let climateHumChart = null;
 let climateFetchTimer = null;
 
+/* ---- Toggle visibilità serie Climate24h ----
+   Oggetto unico di stato: ogni proprietà = chiave localStorage.
+   true = serie visibile, false = nascosta. Default pagina nuova: tutto visibile.
+   - climateTempInternalVisible → Temperatura Interna (rosso)
+   - climateTempExternalVisible → Temperatura Esterna (blu)
+   - climateHumInternalVisible  → Umidità Interna (arancione)
+   - climateHumExternalVisible  → Umidità Esterna (azzurro) */
+let climateSeriesVisible = {
+  climateTempInternalVisible: true,
+  climateTempExternalVisible: true,
+  climateHumInternalVisible:  true,
+  climateHumExternalVisible:  true
+};
+
+// Metadati serie → (gruppo grafico, dataset index, chiave localStorage)
+const CLIMATE_SERIES_MAP = [
+  { group: "temp", which: "int", dataset: 0, key: "climateTempInternalVisible" },
+  { group: "temp", which: "ext", dataset: 1, key: "climateTempExternalVisible" },
+  { group: "hum",  which: "int", dataset: 0, key: "climateHumInternalVisible"  },
+  { group: "hum",  which: "ext", dataset: 1, key: "climateHumExternalVisible"  }
+];
+
 // Creazione UNA sola volta: le funzioni successive aggiornano SOLO
 // datasets e labels (mai nuova creazione degli oggetti Chart).
 function ensureClimateCharts() {
@@ -1122,6 +1189,10 @@ function ensureClimateCharts() {
       }
     });
   }
+
+  // Applica lo stato di visibilità salvato ai dataset appena creati
+  // (hidden) e sincronizza le pillole.
+  applyClimateSeriesState();
 }
 
 // Aggiorna SOLO datasets e labels dei due grafici già creati.
@@ -1144,6 +1215,59 @@ function updateClimateCharts(d) {
   climateHumChart.data.datasets[0].data = hInt;
   climateHumChart.data.datasets[1].data = hExt;
   climateHumChart.update();
+}
+
+/* ---- Toggle visibilità serie Climate24h ---- */
+
+// Ripristina da localStorage lo stato di visibilità delle 4 serie.
+// Valore "0" = nascosta, qualsiasi altro (o assente) = visibile.
+function loadClimateSeriesState() {
+  for (const s of CLIMATE_SERIES_MAP) {
+    const stored = localStorage.getItem(s.key);
+    climateSeriesVisible[s.key] = stored !== "0";
+  }
+}
+
+// Applica lo stato corrente a dataset.hidden e alle pillole, poi update().
+// I grafici NON vengono mai ricreati: cambia solo la prop hidden.
+function applyClimateSeriesState() {
+  for (const s of CLIMATE_SERIES_MAP) {
+    const chart = s.group === "temp" ? climateTempChart : climateHumChart;
+    if (chart) chart.data.datasets[s.dataset].hidden = !climateSeriesVisible[s.key];
+
+    const pill = document.querySelector(`[data-climseries="${s.group}:${s.which}"]`);
+    if (pill) pill.classList.toggle("active", climateSeriesVisible[s.key]);
+  }
+
+  if (climateTempChart) climateTempChart.update();
+  if (climateHumChart) climateHumChart.update();
+}
+
+// Toggle di una singola serie (pillola). Chart.js ricalcola da solo la
+// scala Y escludendo i dataset con hidden=true.
+function toggleClimateSeries(group, which) {
+  const s = CLIMATE_SERIES_MAP.find(x => x.group === group && x.which === which);
+  if (!s) return;
+
+  // Meccanismo anti-"0 serie visibili": se la serie è visibile e l'altra
+  // del gruppo è già nascosta, nasconderla lascierebbe ZERO serie.
+  // → il click viene ignorato.
+  if (climateSeriesVisible[s.key]) {
+    const other = CLIMATE_SERIES_MAP.find(x => x.group === group && x.which !== which);
+    if (other && !climateSeriesVisible[other.key]) return;
+  }
+
+  climateSeriesVisible[s.key] = !climateSeriesVisible[s.key];
+  localStorage.setItem(s.key, climateSeriesVisible[s.key] ? "1" : "0");
+
+  const chart = group === "temp" ? climateTempChart : climateHumChart;
+  if (chart) {
+    chart.data.datasets[s.dataset].hidden = !climateSeriesVisible[s.key];
+    chart.update();
+  }
+
+  const pill = document.querySelector(`[data-climseries="${group}:${which}"]`);
+  if (pill) pill.classList.toggle("active", climateSeriesVisible[s.key]);
 }
 
 // Range 1h/6h/24h → /data/climate?n=60|360|1440 (salvato in localStorage)
@@ -1702,6 +1826,11 @@ window.onload = () => {
 
   const savedClimateRange = Number(localStorage.getItem("climateRange")) || 1;
   setClimateRange(savedClimateRange);
+
+  // Toggle visibilità serie Climate24h: ripristina lo stato salvato
+  // (pillole + dataset.hidden dei grafici, se già creati).
+  loadClimateSeriesState();
+  applyClimateSeriesState();
 
 
   // Ridisegna se cambia dimensione finestra
