@@ -27,6 +27,9 @@ void handleDataSolar();
 // Handler dati batteria (grafico 24h)
 void handleDataBattery();
 
+// Handler dati clima 24h
+void handleDataClimate();
+
 // Handler pagine web statiche
 void handleIndex();
 void handleChartJs();

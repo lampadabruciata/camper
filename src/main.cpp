@@ -1515,6 +1515,7 @@ if (!adsSolarOk) {
   // ✅ Nuovi endpoint separati
   server.on("/data/live", handleDataLive);
   server.on("/data/battery", handleDataBattery);
+  server.on("/data/climate", handleDataClimate);
   server.on("/data/solar", handleDataSolar);
   server.on("/data/water", handleDataWater);
   server.on("/data/gas", handleDataGas);

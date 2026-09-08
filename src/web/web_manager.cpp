@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <TimeLib.h>
 #include <esp_system.h>
+#include <math.h>
 #include "storage/crash_logger.h"
 #include "dht/dht_manager.h"
 #include <vector>
@@ -61,6 +62,14 @@ extern float solAhHourlyYesterday[24];
 extern float voltageSamples[];
 extern float currentSamples[];
 
+// Variabili esterne per handleDataClimate (definite in main.cpp)
+extern float climateTempInt[];
+extern float climateTempExt[];
+extern float climateHumInt[];
+extern float climateHumExt[];
+extern uint32_t climateEpochMinutes[];
+extern int climateSampleIndex;
+
 // Variabili esterni (definite en main.cpp)
 extern bool sdOk;
 extern volatile bool adsPresent;
@@ -68,6 +77,7 @@ extern volatile bool lisPresent;
 extern bool timeValid;
 extern int8_t tzOffsetHours;
 time_t nowEpoch();
+time_t utcToLocal(time_t utcEpoch);
 
 void sendFile(const char* path, const char* mime) {
   if (!SPIFFS.exists(path)) {
@@ -401,6 +411,105 @@ void handleDataBattery() {
 }
 
 
+// ============================================================
+// CLIMA 24H — GET /data/climate
+// Finestra: 60 (1h) / 360 (6h) / 1440 (24h) via ?n=N.
+// JSON: { "tInt":[], "tExt":[], "hInt":[], "hExt":[],
+//         "labels":[], "epoch":[] }
+// Campioni mancanti (epoch == 0 oppure valore NAN) -> null nel
+// JSON: MAI zero, MAI riempimento del buco.
+// Stessa filosofia di handleDataBattery()/handleDataSolar():
+//   - max 250 punti per grafico, step = ceil(n / MAX)
+//   - vTaskDelay(1) ogni 20 iterazioni (nutrizione watchdog)
+//   - DynamicJsonDocument a capacità fissa
+// ============================================================
+void handleDataClimate() {
+    lastWebActivity = millis(); // ✅ segna attività web
+
+    // Finestra richiesta dal frontend: 60 (1h) / 360 (6h) / 1440 (24h)
+    int n = 360;  // default se parametro assente o non valido
+    if (server.hasArg("n")) {
+        n = server.arg("n").toInt();
+        if (n <= 0 || n > 1440) n = 360;
+    }
+
+    // Limite assoluto: MAI piu' di MAX_GRAPH_POINTS punti per grafico.
+    // Verifica DynamicJsonDocument(16000) - ArduinoJson v7, slotSize ~8B:
+    //   6 array * 250 punti = 1500 slot (+overhead stringhe labels).
+    //   Carico pari a handleDataBattery (5 array * 300 = 1500 slot),
+    //   quindi lo stesso buffer 16000 resta valido (margine ~17%).
+    const int MAX_GRAPH_POINTS = 250;
+    // step con arrotondamento all'intero superiore (ceil): copre
+    // TUTTA la finestra con <= MAX_GRAPH_POINTS punti
+    const int step = (n + MAX_GRAPH_POINTS - 1) / MAX_GRAPH_POINTS;
+
+    DynamicJsonDocument json(16000);
+
+    JsonArray tInt   = json.createNestedArray("tInt");
+    JsonArray tExt   = json.createNestedArray("tExt");
+    JsonArray hInt   = json.createNestedArray("hInt");
+    JsonArray hExt   = json.createNestedArray("hExt");
+    JsonArray labels = json.createNestedArray("labels");
+    JsonArray epoch  = json.createNestedArray("epoch");
+
+    const int total = 1440;  // climateSamples (main.cpp)
+    const int start = (climateSampleIndex - n + total) % total;
+
+    time_t nowMin = nowEpoch() / 60;
+
+    int validCount = 0;
+
+    for (int k = 0; k < n && validCount < MAX_GRAPH_POINTS; k += step) {
+
+        if ((k % 20) == 0) {
+            vTaskDelay(1);   // ✅ nutrizione watchdog
+        }
+
+        int idx = (start + k) % total;
+
+        uint32_t ep = climateEpochMinutes[idx];
+
+        // campione troppo vecchio (fuori finestra 24h): non emesso
+        if (ep != 0 && ep < (nowMin - 1440)) continue;
+
+        // buco reale: epoch 0 (gap) oppure dato NAN (lettura fallita)
+        bool missing =
+            (ep == 0) ||
+            isnan(climateTempInt[idx]) || isnan(climateTempExt[idx]) ||
+            isnan(climateHumInt[idx])  || isnan(climateHumExt[idx]);
+
+        // label orario locale (CET/CEST) derivata dall'epoch in minuti
+        char buf[8] = "--:--";
+        if (ep != 0) {
+            time_t tLocal = utcToLocal((time_t)ep * 60);
+            tmElements_t tm;
+            breakTime(tLocal, tm);
+            snprintf(buf, sizeof(buf), "%02d:%02d", tm.Hour, tm.Minute);
+        }
+        labels.add(buf);
+
+        if (missing) {
+            // buco reale: null nel JSON, NIENTE zero, NIENTE fill
+            tInt.add(nullptr);
+            tExt.add(nullptr);
+            hInt.add(nullptr);
+            hExt.add(nullptr);
+        } else {
+            tInt.add(climateTempInt[idx]);
+            tExt.add(climateTempExt[idx]);
+            hInt.add(climateHumInt[idx]);
+            hExt.add(climateHumExt[idx]);
+        }
+
+        epoch.add(ep);   // 0 = gap, altrimenti epoch in minuti UTC
+
+        validCount++;
+    }
+
+    String out;
+    serializeJson(json, out);
+    server.send(200, "application/json", out);
+}
 
 // ============================================================
 // DIAGNOSTICA REBOOT — GET /api/boot
