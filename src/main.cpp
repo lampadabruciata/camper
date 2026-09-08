@@ -28,6 +28,7 @@
 #include "time/time_manager.h"
 #include "web/web_manager.h"
 #include "storage/graph_storage.h"
+#include "storage/climate_storage.h"
 #include "storage/crash_logger.h"
 #include "dht/dht_manager.h"
 
@@ -317,13 +318,13 @@ float solarCurrentSamples[numSamples];
 float solarCurrentSum = 0.0f;
 
 // ========================================================
-// ==========  LOG CLIMA 24h (FASE F1 - RAM SOLO)  ========
+// ==========  LOG CLIMA 24h (FASE F2 - RAM + SD)  ========
 // ========================================================
 // Serie: temperatura interna/esterna, umidità interna/esterna.
 // Finestra: 1440 campioni = 24h a 1 campione/minuto.
 // Dato assente o gap → NAN (float) / 0 (epoch).
-// FASE F1: solo buffer RAM. Niente SD, niente restore:
-// climateRestored resta false per costruzione.
+// FASE F2: persistenza SD /climate24h.bin ogni 5 min via
+// saveClimateToSD(); restore in LateRestoreTask.
 const int climateSamples = 1440;                  // 24h a 1 campione/min
 float climateTempInt[climateSamples];             // temperatura interna °C
 float climateTempExt[climateSamples];             // temperatura esterna °C
@@ -331,7 +332,7 @@ float climateHumInt[climateSamples];              // umidità interna %
 float climateHumExt[climateSamples];              // umidità esterna %
 uint32_t climateEpochMinutes[climateSamples];     // epoch in minuti UTC (0 = gap)
 int climateSampleIndex = 0;                       // indice corrente buffer circolare
-bool climateRestored = false;                     // F1: nessun restore SD
+bool climateRestored = false;                     // F2: true solo dopo restore SD valido
 
 int currentHour   = 0;
 int currentMinute = 0;
@@ -1696,10 +1697,10 @@ server.on("/level", []() {
   }
 
   // ------------------------
-  // Inizializzazione buffer clima 24h (FASE F1 — RAM SOLO)
+  // Inizializzazione buffer clima 24h (FASE F2)
   // ------------------------
-  // Niente SD in questa fase: nessun save, nessun restore.
-  // climateRestored resta false per costruzione.
+  // Il restore SD avviene in LateRestoreTask (~8s dopo il boot):
+  // se non c'è file valido il buffer resta a NAN (buchi reali).
   climateRestored = false;
   climateSampleIndex = 0;
   for (int i = 0; i < climateSamples; i++) {
@@ -2176,7 +2177,7 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     accumCount = 0;
 
     // ============================================================
-    // ✅ CAMPIONAMENTO CLIMA 24h (FASE F1 — RAM, 1 volta/min)
+    // ✅ CAMPIONAMENTO CLIMA 24h (FASE F2 — RAM, 1 volta/min)
     // Usa SOLO i dati già letti da DHTTask in dhtSensors[]:
     // nessuna lettura fisica qui. Se il canale non è valido o un
     // valore è NAN → scrive NAN (buco reale nello storico).
@@ -2222,6 +2223,16 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
         uint32_t dtGraph = micros() - tGraph;
         if (dtGraph > saveGraphToSDMaxUs) saveGraphToSDMaxUs = dtGraph;
         lastGraphSave = millis();
+    }
+
+    // ===============================
+    // ✅ SALVATAGGIO SD CLIMA (F2) — ogni 5 minuti (mai ogni minuto)
+    // ===============================
+    static unsigned long lastClimateSave = 0;
+
+    if (millis() - lastClimateSave > 300000UL) {
+        saveClimateToSD();
+        lastClimateSave = millis();
     }
 }
 }
@@ -2538,6 +2549,9 @@ void LateRestoreTask(void *param) {
   if (sdOk) {
     Serial.println("[GRAPH] Late restore...");
     restoreGraphFromSD();
+
+    // ✅ CLIMA 24h (F2): restore SD subito dopo il graph
+    restoreClimateFromSD();
 
     // ✅ inizializza lastSampleMinute dal buffer
     if (sampleIndex > 0) {
