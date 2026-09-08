@@ -23,18 +23,12 @@ extern unsigned long rtcBaseMillis;
 // ---- FUSO ORARIO: calcolo DST europeo ----
 // Regola UE: ultima domenica di marzo alle 02:00 → 03:00 (DST on)
 //            ultima domenica di ottobre alle 03:00 → 02:00 (DST off)
-void updateDST() {
-  if (!timeValid) return;
 
-  time_t utcNow = nowEpoch();
-  tmElements_t tmUtc;
-  breakTime(utcNow, tmUtc);
-
-  int year  = tmUtc.Year + 1970;
-  int month = tmUtc.Month;
-  int day   = tmUtc.Day;
-  int hour  = tmUtc.Hour;
-
+// Calcola il DST europeo da una data/ora UTC (campi estratti) e aggiorna
+// tzIsDST / tzOffsetHours. Condivisa dal ramo normale (epoch da nowEpoch())
+// e dal ramo boot (lettura RTC in sola lettura quando timeValid è false),
+// così la regola DST resta identica su entrambi i percorsi.
+static void applyDST(int year, int month, int day, int hour) {
   // Ultima domenica di marzo
   int marchLastSun = 31 - ((5 * year / 4 + 4) % 7);
   // Ultima domenica di ottobre
@@ -52,8 +46,36 @@ void updateDST() {
     else if (day == octLastSun && hour < 1) dst = true;
   }
 
-tzIsDST = dst;
+  tzIsDST = dst;
   tzOffsetHours = dst ? 2 : 1;
+}
+
+void updateDST() {
+  if (!timeValid) {
+    // ---- BOOT: timeValid è ancora false (crashlog/reset reason) ----
+    // L'RTC è già allineato in UTC (da boot precedenti): lo leggiamo in
+    // SOLA LETTURA (rtc.now(), mai rtc.adjust()) per calcolare il fuso
+    // DST corretto anche prima che setup()/handleSetTime() portino
+    // timeValid a true. Le variabili di stato (rtcBaseEpoch,
+    // rtcBaseMillis, timeValid) non vengono toccate.
+    if (!rtc.begin()) return;                            // RTC assente → default invariato
+    DateTime now = rtc.now();                            // ⚠ SOLA LETTURA
+    if (now.year() < 2023 || now.year() >= 2100) return; // anno non plausibile
+
+    applyDST(now.year(), now.month(), now.day(), now.hour());
+    return;
+  }
+
+  time_t utcNow = nowEpoch();
+  tmElements_t tmUtc;
+  breakTime(utcNow, tmUtc);
+
+  int year  = tmUtc.Year + 1970;
+  int month = tmUtc.Month;
+  int day   = tmUtc.Day;
+  int hour  = tmUtc.Hour;
+
+  applyDST(year, month, day, hour);
 }
 
 // Converte epoch UTC in epoch locale (per display e grafici)
