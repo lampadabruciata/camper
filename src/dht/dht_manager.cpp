@@ -98,22 +98,33 @@ static bool readSensor(dhtSensor_t &sensor, float &temperature, float &humidity)
 // Allo scadere viene eseguito un nuovo tentativo.
 // Lo stato quarantena è parte del modello dati (dhtSensor_t).
 #define DHT_QUARANTINE_ERRORS      5U                     // 5 errori consecutivi
-#define DHT_QUARANTINE_DURATION_MS (10UL * 60UL * 1000UL) // 10 minuti
+// [DIAG-TEMP] Durata quarantena ridotta a 1 minuto (60.000 ms) per le prove
+// sul banco. PER RIPRISTINARE a 10 minuti: (10UL * 60UL * 1000UL).
+#define DHT_QUARANTINE_DURATION_MS (1UL * 60UL * 1000UL)  // 1 minuto (60.000 ms)
 
 // ============================================================
 // AGGIORNAMENTO SINGOLO CANALE DHT (con quarantena)
 // ============================================================
 // - In quarantena: nessuna lettura fisica finché non scade il periodo.
 // - Lettura non valida: incrementa gli errori consecutivi; al 5° errore
-//   avvia la sospensione (backoff 10 minuti).
+//   avvia la sospensione (backoff 1 minuto, valore temporaneo di diagnostica).
 // - Lettura valida: azzera gli errori e aggiorna SOLO i valori validi
 //   (conserva l'ultimo valore letto correttamente).
 static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
+  // Canale corrente (indice dell'array dhtSensors[]) per i log diagnostici
+  // di ingresso/uscita quarantena. DHT_CHANNEL_EXTERNAL="DHT_EXT",
+  // DHT_CHANNEL_INTERNAL="DHT_INT" (vedi dhtChannelLabel()).
+  const DhtChannel ch = (DhtChannel)(&sensor - dhtSensors);
+
   // --- Quarantena attiva: nessuna lettura fino alla scadenza ---
   if (sensor.quarantinedUntil != 0) {
     if ((int32_t)(now - sensor.quarantinedUntil) < 0) return;
     sensor.quarantinedUntil = 0;   // scaduta: riprova in questo ciclo
     sensor.failCount        = 0;
+    // [DIAG-TEMP] Log uscita quarantena: il canale viene riprovato.
+    Serial.print("[");
+    Serial.print(dhtChannelLabel(ch));
+    Serial.println("] leaving quarantine");
   }
 
   // --- Lettura fisica (solo qui, mai nel percorso critico) ---
@@ -128,6 +139,12 @@ static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
       sensor.failCount        = 0;
       sensor.quarantinedUntil = now;   // inizio periodo di sospensione
       sensor.quarantineCount++;        // telemetria: ingresso in quarantena
+      // [DIAG-TEMP] Log ingresso quarantena (durata attuale del backoff).
+      Serial.print("[");
+      Serial.print(dhtChannelLabel(ch));
+      Serial.print("] entering quarantine for ");
+      Serial.print(DHT_QUARANTINE_DURATION_MS / 1000UL);
+      Serial.println(" s");
     }
     return;
   }
