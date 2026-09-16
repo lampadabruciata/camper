@@ -1114,6 +1114,285 @@ handleSetTank() ora accetta:
 
 Test superato.
 
+## 2026-08-25 - Deadband anti-rumore sui grafici Ah (aggregazione minuto)
+
+### Problema
+
+- Tutti i grafici Ah mostravano micro-barre generate dal rumore residuo che supera sporadicamente i gate da 10/20 mA della corrente.
+- Le barre comparivano nel live 60 minuti (`ahMinuteDischarge[]`/`ahMinuteCharge[]`), negli istogrammi orari (`ahHourlyToday[]`/`ahChargeHourlyToday[]`) e gonfiavano i totali giornalieri.
+
+### Analisi numerica
+
+- Gate esistenti a monte: `amps_raw < 0.02 A -> 0`, `currentFiltered < 0.01 A -> 0`, `iForAh < 0.01 A -> 0`, dt = 1 s.
+- Un spike che passa il gate contribuisce <= 0.05/3600 = 1.4e-5 Ah per secondo.
+- Micro-barra tipica osservabile via `[AH-NOISE]`: 1e-5...1e-4 Ah/min; picco ~3e-4 Ah/min.
+- Piu' piccolo carico reale continuo (50 mA): 8.3e-4 Ah/min.
+
+### Soluzione
+
+Deadband unico applicato nel tick del minuto (punto unico di aggregazione), PRIMA della scrittura di:
+
+- `ahMinuteDischarge[60]` / `ahMinuteCharge[60]`
+- `ahHourlyToday[24]` / `ahChargeHourlyToday[24]`
+- `ahTodayTotal_global` / `ahChargeTodayTotal_global`
+
+```cpp
+const float AH_MINUTE_DEADBAND_AH = 0.0005f;  // 0,5 mAh/min = 30 mA medi per minuto pieno
+if (minuteDischargeRaw >= AH_MINUTE_DEADBAND_AH)
+    minuteDischarge = minuteDischargeRaw;     // altrimenti resta 0
+```
+
+Scarto secco (non carry-over): il carry-over riemetterebbe periodicamente il rumore accumulato come nuove micro-barre.
+
+### Coerenza matematica
+
+Ore, totali e barre derivano dalla stessa variabile filtrata nello stesso tick:
+somma barre = somma ore = totale visualizzato, per costruzione.
+Il SOC (`batteryAh_now`) non e' toccato: integra in `integrateAh()` a parte.
+Sottostima statistica massima teorica 0.72 Ah/giorno (irrealistica), tipica < 0.05 Ah/giorno.
+
+### Non modificato
+
+- Frontend (nessun filtro lato browser).
+- Endpoint `/data/ahLive`, `/data/ah24h`, `/data/battery` (serializzano le variabili gia' filtrate alla fonte).
+- Storage SD (persistisce gli array gia' filtrati).
+
+### File modificati
+
+- `src/main.cpp` (solo)
+
+
+---
+---
+## 2026-09-16 - Investigazione DHT, FRAME_TIMEOUT e stabilità firmware
+
+### Problema
+
+Storicamente il firmware ha mostrato reboot sporadici compatibili con problemi di watchdog (INT_WDT).
+I sensori DHT erano tra i principali sospettati.
+
+Dopo il refactoring del sottosistema DHT e l'introduzione della libreria DHT custom "Soluzione B", i reboot sembrano essersi drasticamente ridotti o eliminati.
+Parallelamente è emersa una forte degradazione dell'affidabilità delle letture DHT, soprattutto sul canale interno.
+
+### Contesto hardware
+
+Sensori:
+
+- DHT esterno: AM2301 (DHT21), GPIO14
+- DHT interno: AM2301 (DHT21), GPIO4
+
+Verifiche effettuate:
+
+- sostituito il DHT interno con un AM2301 nuovo
+- invertiti fisicamente i due sensori
+- utilizzo di coppia twistata CAT5 per DATA/GND sul sensore interno
+- aggiunta pull-up esterna 4.7kΩ tra DATA e 3.3V sul canale interno
+
+Nessuna delle prove ha eliminato il problema del DHT interno.
+
+### Diagnostica introdotta
+
+Aggiunta telemetria nella libreria DHT:
+
+- `DHT::lastFailure()`
+
+Categorie:
+
+- NONE
+- PULSE_LOW_TIMEOUT
+- PULSE_HIGH_TIMEOUT
+- FRAME_TIMEOUT
+- BIT_TIMEOUT
+- CHECKSUM_ERROR
+
+Successivamente aggiunti contatori cumulativi per canale:
+
+- pulseLowTimeouts
+- pulseHighTimeouts
+- frameTimeouts
+- bitTimeouts
+- checksumErrors
+
+Esposizione tramite `/api/boot` per DHT_EXT e DHT_INT.
+
+### Risultati osservati
+
+Campione raccolto:
+
+DHT_EXT
+
+- reads = 377
+- failures = 91
+- pulseLowTimeouts = 0
+- pulseHighTimeouts = 0
+- frameTimeouts = 0
+- bitTimeouts = 0
+- checksumErrors = 91
+
+Conclusione: il DHT esterno completa correttamente il protocollo ma produce occasionalmente errori di checksum.
+
+DHT_INT
+
+- reads = 377
+- failures = 376
+- pulseLowTimeouts = 0
+- pulseHighTimeouts = 0
+- frameTimeouts = 361
+- bitTimeouts = 15
+- checksumErrors = 0
+
+Conclusione: il DHT interno non soffre di errori di handshake. Il protocollo parte correttamente ma nella quasi totalità dei casi il frame non viene completato entro il budget temporale previsto dalla libreria. FRAME_TIMEOUT è la modalità di errore dominante.
+
+### Analisi del fork DHT
+
+Confronto con la libreria Adafruit originale:
+
+Originale:
+
+- timeout basati su conteggio cicli CPU
+- timeout reale su ESP32 ≈ 35 ms per pulse
+- nessun budget sull'intero frame
+- interrupt disabilitati per l'intero frame
+- possibile permanenza in sezione critica fino a circa 2,9 s
+
+Fork "Soluzione B":
+
+- `DHT_PULSE_BUDGET_US = 1000`
+- `DHT_FRAME_BUDGET_US = 20000`
+- timeout basati su `micros()`
+- interrupt disabilitati solo per il singolo pulse
+- durata massima di `read()` circa 24 ms
+
+Conclusione: il fork è molto più severo verso il sensore ma molto più sicuro per la stabilità dell'ESP32.
+
+### Impatto sulla stabilità
+
+Dopo l'introduzione della Soluzione B:
+
+- nessun INT_WDT osservato durante il test
+- uptime superiore a molte ore consecutive
+- forte evidenza che la precedente implementazione DHT fosse coinvolta nei reboot
+
+La correlazione DHT ↔ watchdog rimane il principale candidato per spiegare gli INT_WDT storici.
+
+### Decisione progettuale
+
+Priorità:
+
+1. stabilità del firmware
+2. eliminazione dei reboot
+3. affidabilità delle letture DHT
+
+Non effettuare rollback alla libreria DHT originale senza un piano di mitigazione watchdog.
+Eventuali miglioramenti futuri dovranno preservare:
+
+- budget temporali protetti
+- assenza di blocchi prolungati degli interrupt
+- stabilità osservata del sistema
+
+### Stato attuale
+
+- firmware stabile
+- DHT esterno: problemi prevalentemente di checksum
+- DHT interno: problemi prevalentemente di frame timeout
+- nessun conflitto software individuato sui GPIO 4 e 14
+- nessuna evidenza di sensore guasto
+- indagine DHT ancora aperta
+
+
+### Addendum tecnico (verifica sul codice, 2026-09-16)
+
+Analisi completa in **`ANALISI_DHT_FRAME_TIMEOUT.md`**. In sintesi:
+
+- **`FRAME_TIMEOUT` non significa "frame lento"**: in `DHT.cpp` il `TIMEOUT` restituito da `expectPulse()` non interrompe il loop dei 40 bit (viene testato solo dopo, nel secondo loop). Un pulse in timeout precoce fa bruciare il budget da 1000 µs alle attese residue, quindi il tetto dei 20 ms scatta **prima** del controllo → `FRAME_TIMEOUT`; lo stesso evento in coda al frame diventa `BIT_TIMEOUT`. **Sono lo stesso evento fisico classificato in base al punto di interruzione** (361/15 ⇒ interruzione tipica nei primi ~80% del frame).
+- Un sensore sano ma lento **non può** generare ≥16 attese morte: servono più di 1 ms di linea ferma, ripetuti ⇒ il canale interno **smette di commutare subito dopo l'handshake**.
+- `PULSE_*_TIMEOUT = 0` esclude cablaggio interrotto/pull-up assente; `CHECKSUM_ERROR = 0` sul canale interno esclude distorsione del segnale: è un guasto **duro e sistematico** sulla rete di GPIO 4, non una marginalità.
+- I 91 checksum error di EXT (0 timeout) sono compatibili con la finestra di prelazione fra la misura LOW e HIGH dello stesso bit: `InterruptLock` è per-pulse e `DHTTask` gira su Core 0 a priorità 1 (WiFi/lwIP a 18–23). Effetto collaterale noto del fork, non un motivo per tornare all'originale.
+- **Ipotesi principali**: H1 rete/pin GPIO 4 (il guasto segue il canale, non il sensore); H2 margine di alimentazione del sensore (brownout a metà frame); H3 desincronizzazione del lettore.
+- **Escluso**: conflitti software sui pin (GPIO 4 usato solo dal DHT interno; flow 27, button 13, HX711 32/33 e 25/26), sensore guasto, pull-up mancante, budget troppo severo.
+- **Telemetria aggiunta** (solo osservabilità; budget, timeout, quarantena, `readEnabled` e task invariati): `DHT::lastFrameDiag()` nella libreria e, per canale, `lastFramePulses` / `lastFrameLowTimeouts` / `lastFrameHighTimeouts` / `lastFrameMaxPulseUs` su `/api/boot`, più i cumulativi `frameLowTimeoutPulses` / `frameHighTimeoutPulses` / `maxPulseUs` anche in `/last_diag.txt` e `/crashlog.txt`. Discriminano "linea statica" da "bitstream lento/desincronizzato".
+- **Prossimi passi** (dal più economico): nuovo campione da `/api/boot` letto con la tabella di interpretazione; scambio dei due pin in software per capire se il guasto segue il pin o il sensore; sensore interno in banco con filo corto e decoupling locale; misura di VDD e DATA durante la lettura; inversione dell'ordine di lettura EXT/INT.
+
+Build verificata: `pio run -e esp32dev` → **SUCCESS** (RAM 34,1%, Flash 79,5%).
+
+### File modificati (solo telemetria additiva)
+
+- `lib/DHT/DHT.h`, `lib/DHT/DHT.cpp`
+- `src/dht/dht_manager.h`, `src/dht/dht_manager.cpp`
+- `src/web/web_manager.cpp`
+- `src/main.cpp` (`saveDiagSnapshot`)
+- `src/storage/crash_logger.cpp` (`logCrash`)
+- `ANALISI_DHT_FRAME_TIMEOUT.md` (nuovo)
+
+
+---
+---
+## 2026-09-16 - Investigazione DHT e watchdog: esito consolidato
+
+Checkpoint conclusivo dell'indagine riassunta nella sezione precedente.
+Dettaglio tecnico in **`ANALISI_DHT_FRAME_TIMEOUT.md`** e **`DHT_WATCHDOG_ROOT_CAUSE_ANALYSIS.md`**.
+
+### Problema iniziale
+
+- Reboot sporadici del firmware compatibili con **INT_WDT**, noti da luglio 2026 e mai osservati con la task DHT sospesa.
+- La libreria Adafruit DHT originale disabilita gli interrupt per l'intero frame: caso peggiore stimato fino a ~2,9 s di sezione critica, quindi oltre i limiti del watchdog.
+- Dopo il refactoring del sottosistema DHT e l'adozione del fork **"Soluzione B"** i reboot sono di fatto scomparsi, ma è emersa una forte degradazione dell'affidabilità delle letture, concentrata sul **canale interno** (GPIO 4).
+
+### Interventi svolti
+
+Hardware:
+
+- sostituito il DHT interno con un **AM2301 (DHT21) nuovo**: nessun miglioramento;
+- **invertiti fisicamente** i due sensori: il problema è rimasto associato al ramo interno e non al sensore testato. Non è ancora stato eseguito lo scambio software dei GPIO, quindi il legame definitivo con GPIO4 non è ancora stato dimostrato.
+- doppino twistato CAT5 per DATA/GND sul canale interno;
+- **pull-up esterna aggiuntiva 4.7kΩ** tra DATA e 3.3V sul canale interno: nessun miglioramento significativo.
+
+Software (solo telemetria additiva, nessuna modifica alla logica di lettura):
+
+- `DHT::lastFailure()` con le categorie `NONE`, `PULSE_LOW_TIMEOUT`, `PULSE_HIGH_TIMEOUT`, `FRAME_TIMEOUT`, `BIT_TIMEOUT`, `CHECKSUM_ERROR`;
+- contatori cumulativi per canale (`pulseLowTimeouts`, `pulseHighTimeouts`, `frameTimeouts`, `bitTimeouts`, `checksumErrors`) esposti in `/api/boot` per `DHT_EXT` e `DHT_INT`;
+- verifica dei pin sul repository: **nessun conflitto software** su GPIO 4 e GPIO 14 (GPIO 4 usato solo dal DHT interno, GPIO 14 solo dal DHT esterno).
+
+### Telemetria raccolta
+
+DHT_EXT (GPIO 14, AM2301)
+
+- reads = 377
+- failures = 91
+- pulseLowTimeouts = 0 / pulseHighTimeouts = 0
+- frameTimeouts = 0 / bitTimeouts = 0
+- checksumErrors = 91
+
+DHT_INT (GPIO 4, AM2301)
+
+- reads = 377
+- failures = 376
+- pulseLowTimeouts = 0 / pulseHighTimeouts = 0
+- frameTimeouts = 361 / bitTimeouts = 15
+- checksumErrors = 0
+
+Lettura dei dati:
+
+- **DHT_EXT**: il protocollo si completa sempre, l'errore è solo di **checksum** (91/377) → bitstream integro ma occasionalmente disturbato.
+- **DHT_INT**: handshake sempre corretto, frame quasi mai completato; `FRAME_TIMEOUT` (361) e `BIT_TIMEOUT` (15) sono lo **stesso evento fisico**, classificato in base al punto di interruzione del frame.
+- `PULSE_*_TIMEOUT = 0` su entrambi i canali esclude cablaggio interrotto o pull-up assente; `CHECKSUM_ERROR = 0` sul canale interno esclude distorsione del segnale.
+
+### Conclusioni raggiunte
+
+- Il guasto del canale interno è **duro e sistematico** sulla rete di GPIO 4: non è una marginalità e non è il sensore (sostituito e invertito senza effetto).
+- La pull-up aggiuntiva da 4.7kΩ non ha prodotto miglioramenti misurabili. L'ipotesi 'pull-up troppo debole' perde forza, ma non è possibile escludere completamente fenomeni elettrici dinamici, disturbi locali o problemi legati al percorso fisico del segnale.
+- Nessun conflitto software o di assegnazione pin individuato nel repository.
+- Il fork **"Soluzione B"** (`DHT_PULSE_BUDGET_US = 1000`, `DHT_FRAME_BUDGET_US = 20000`, timeout su `micros()`, interrupt disabilitati solo per il singolo pulse, `read()` limitata a ~24 ms) è **fortemente correlato alla scomparsa dei reboot watchdog**: uptime osservato superiore a molte ore consecutive, senza INT_WDT anomali.
+- Resta l'ipotesi di un problema **elettrico locale** sul canale interno (rete/pin di GPIO 4 o margine di alimentazione del sensore), non un difetto della libreria.
+
+### Decisione progettuale attuale
+
+- **Mantenere il fork "Soluzione B"**: nessun rollback alla libreria Adafruit originale senza un piano di mitigazione watchdog.
+- Priorità invariata: 1. stabilità del firmware, 2. assenza di reboot, 3. affidabilità delle letture DHT.
+- Non alterare i budget temporali e non reintrodurre sezioni critiche lunghe: ogni modifica futura deve preservare l'assenza di blocchi prolungati degli interrupt.
+- L'indagine sul DHT interno resta **aperta ma non bloccante**: la degradazione attuale del canale interno non compromette la stabilità del sistema.
+
+
 ---
 ---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*
