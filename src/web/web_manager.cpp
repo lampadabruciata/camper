@@ -561,7 +561,16 @@ void handleDataBoot() {
 
   // ---- TELEMETRIA DHT PER-CANALE (solo diagnostica) ----
   // Ogni canale espone readEnabled/valid/reads/failures/failCount/
-  // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec.
+  // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec,
+  // lastFailure (etichetta dello stato dell'ultima lettura fisica) e
+  // lastStatus (codice grezzo DHTLIB_* restituito da DHTNEW::read()).
+  // [PROVA DHTNEW] I contatori di errore per categoria del fork
+  // (pulseLowTimeouts/pulseHighTimeouts/frameTimeouts/bitTimeouts/
+  // checksumErrors) e il dettaglio in-frame dell'ultimo tentativo
+  // (lastFramePulses/lastFrameLowTimeouts/lastFrameHighTimeouts/
+  // lastFrameMaxPulseUs) con i cumulativi corrispondenti
+  // (frameLowTimeoutPulses/frameHighTimeoutPulses/maxPulseUs) restano nel
+  // JSON per compatibilità, ma sono INERTI a 0: DHTNEW non li espone.
   // NON modifica il formato di /data/live né quello del frontend.
   JsonObject dht = json.createNestedObject("dht");
   for (int ch = 0; ch < DHT_CHANNEL_COUNT; ch++) {
@@ -577,6 +586,22 @@ void handleDataBoot() {
     co["maxReadUs"]        = s.maxReadUs;
     co["lastValidMs"]      = s.lastValidMs;
     co["ageSec"]           = dhtAgeSec(s);
+    co["lastFailure"]      = dhtFailureLabel(dhtLastStatus((DhtChannel)ch));
+    co["lastStatus"]       = dhtLastStatus((DhtChannel)ch);
+    co["pulseLowTimeouts"]  = s.pulseLowTimeouts;
+    co["pulseHighTimeouts"] = s.pulseHighTimeouts;
+    co["frameTimeouts"]     = s.frameTimeouts;
+    co["bitTimeouts"]       = s.bitTimeouts;
+    co["checksumErrors"]    = s.checksumErrors;
+    // Dettaglio in-frame dell'ultimo tentativo fisico: rimuove l'ambiguità tra
+    // FRAME_TIMEOUT e BIT_TIMEOUT (possono descrivere lo stesso evento fisico).
+    co["lastFramePulses"]       = s.lastFramePulses;
+    co["lastFrameLowTimeouts"]  = s.lastFrameLowTimeouts;
+    co["lastFrameHighTimeouts"] = s.lastFrameHighTimeouts;
+    co["lastFrameMaxPulseUs"]   = s.lastFrameMaxPulseUs;
+    co["frameLowTimeoutPulses"]  = s.frameLowTimeoutPulses;
+    co["frameHighTimeoutPulses"] = s.frameHighTimeoutPulses;
+    co["maxPulseUs"]             = s.maxPulseUs;
   }
 
   String out;
