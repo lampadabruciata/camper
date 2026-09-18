@@ -8,10 +8,10 @@
 #define AM2301_PIN 14
 
 // Sensore interno DHT21
-// TEST TEMPORANEO 2026-09-16: DHT interno su GPIO 13.
-// Catena dei test di isolamento: GPIO 4 (nominale) -> GPIO 2 (intermedio) -> GPIO 13.
-// Il pulsante di cambio pagina è stato spostato da GPIO 13 a GPIO 4 in main.cpp
-// per liberare GPIO 13 e tenere il ramo DHT interno su un GPIO semplice.
+// DHT interno su GPIO 13 (pin in esercizio dal test di isolamento del
+// 2026-09-16: catena GPIO 4 nominale -> GPIO 2 intermedio -> GPIO 13).
+// Il pin è stato liberato spostando il pulsante di cambio pagina da GPIO 13
+// a GPIO 4 in main.cpp, così il ramo DHT interno resta su un GPIO semplice.
 #define DHT_INT_PIN 13
 
 // ============================================================
@@ -47,7 +47,8 @@ static volatile int dhtLastStatusByChannel[DHT_CHANNEL_COUNT] = {
 // ============================================================
 // Definizione dei due canali sensore come modello dati unico.
 // - Esterno: AM2301 (DHT21) su GPIO 14, letture attive (readEnabled=true).
-// - Interno: DHT21 su GPIO 13 (TEST TEMPORANEO, normalmente GPIO 4), letture attive (readEnabled=true).
+// - Interno: DHT21 su GPIO 13 (pin operativo dal test di isolamento del 2026-09-16;
+//   il pin nominale precedente era GPIO 4), letture attive (readEnabled=true).
 // Inizializzati nell'ordine dei campi di dhtSensor_t:
 // dht, readEnabled, temperature, humidity, valid, failCount, quarantinedUntil,
 // reads, failures, quarantineCount, maxReadUs, lastValidMs,
@@ -55,7 +56,7 @@ static volatile int dhtLastStatusByChannel[DHT_CHANNEL_COUNT] = {
 // lastFramePulses, lastFrameLowTimeouts, lastFrameHighTimeouts, lastFrameMaxPulseUs,
 // frameLowTimeoutPulses, frameHighTimeoutPulses, maxPulseUs.
 //
-// [PROVA DHTNEW] Il costruttore DHTNEW(pin) memorizza il pin e, come effetto
+// Il costruttore DHTNEW(pin) memorizza il pin e, come effetto
 // collaterale documentato dalla libreria (reset()), esegue pinMode(OUTPUT) +
 // digitalWrite(HIGH) sulla linea dati durante la costruzione statica (prima
 // di setup()). La cosa è innocua qui: la linea dati è comunque idle-high e
@@ -73,7 +74,7 @@ dhtSensor_t dhtSensors[DHT_CHANNEL_COUNT] = {
 // lettura periodica e gestione errori (quarantena). L'unico
 // percorso di lettura è DHTTask tramite updateDHT(), mai
 // SensorLoop (nessuna lettura DHT nel percorso critico).
-// [PROVA DHTNEW] La transazione fisica sul bus è affidata alla
+// La transazione fisica sul bus è affidata alla
 // libreria DHTNEW (lib/DHTNEW/) al posto del fork DHT.
 // ============================================================
 
@@ -103,7 +104,7 @@ void initDHT() {
 // ============================================================
 // CONTEGGIO ERRORI DHT PER CATEGORIA (solo telemetria)
 // ============================================================
-// [PROVA DHTNEW] Rimosso countDhtFailure() del fork: DHTNEW non espone le
+// Rimosso countDhtFailure() del fork: DHTNEW non espone le
 // categorie DHT::DhtFailure, quindi i contatori per categoria
 // (pulseLowTimeouts/pulseHighTimeouts/frameTimeouts/bitTimeouts/
 // checksumErrors) restano INERTI a 0. L'esito grezzo dell'ultima lettura
@@ -169,7 +170,7 @@ static bool readSensor(dhtSensor_t &sensor, float &temperature, float &humidity)
   if (elapsed > dhtMaxReadUs) dhtMaxReadUs = elapsed;
   if (elapsed > sensor.maxReadUs) sensor.maxReadUs = elapsed;
 
-  // [PROVA DHTNEW] Non vengono alimentati i contatori per categoria né il
+  // Non vengono alimentati i contatori per categoria né il
   // dettaglio in-frame (DHTNEW non espone FrameDiag): restano a 0.
 
   return !isnan(temperature) || !isnan(humidity);
@@ -184,8 +185,9 @@ static bool readSensor(dhtSensor_t &sensor, float &temperature, float &humidity)
 // Allo scadere viene eseguito un nuovo tentativo.
 // Lo stato quarantena è parte del modello dati (dhtSensor_t).
 #define DHT_QUARANTINE_ERRORS      5U                     // 5 errori consecutivi
-// [DIAG-TEMP] Durata quarantena ridotta a 1 minuto (60.000 ms) per le prove
-// sul banco. PER RIPRISTINARE a 10 minuti: (10UL * 60UL * 1000UL).
+// Durata quarantena: 1 minuto (60.000 ms), valore in esercizio. È stato
+// adottato in origine per le prove sul banco (il valore precedente era
+// 10 minuti: (10UL * 60UL * 1000UL)).
 #define DHT_QUARANTINE_DURATION_MS (1UL * 60UL * 1000UL)  // 1 minuto (60.000 ms)
 
 // ============================================================
@@ -218,7 +220,7 @@ static bool dhtValidByAge(uint32_t now, uint32_t lastValidMs) {
 // ============================================================
 // - In quarantena: nessuna lettura fisica finché non scade il periodo.
 // - Lettura non valida: incrementa gli errori consecutivi; al 5° errore
-//   avvia la sospensione (backoff 1 minuto, valore temporaneo di diagnostica).
+//   avvia la sospensione (backoff 1 minuto, DHT_QUARANTINE_DURATION_MS).
 //   Il flag valid NON cade più qui: resta true entro DHT_VALIDITY_TIMEOUT_MS
 //   (60 s) dall'ultima lettura valida, anche durante la quarantena.
 // - Lettura valida: azzera gli errori e aggiorna SOLO i valori validi
@@ -241,7 +243,7 @@ static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
     if ((int32_t)(now - sensor.quarantinedUntil) < 0) return;
     sensor.quarantinedUntil = 0;   // scaduta: riprova in questo ciclo
     sensor.failCount        = 0;
-    // [DIAG-TEMP] Log uscita quarantena: il canale viene riprovato.
+    // Log uscita quarantena: il canale viene riprovato.
     Serial.print("[");
     Serial.print(dhtChannelLabel(ch));
     Serial.println("] leaving quarantine");
@@ -261,7 +263,7 @@ static void updateDhtChannel(dhtSensor_t &sensor, uint32_t now) {
       sensor.failCount        = 0;
       sensor.quarantinedUntil = now;   // inizio periodo di sospensione
       sensor.quarantineCount++;        // telemetria: ingresso in quarantena
-      // [DIAG-TEMP] Log ingresso quarantena (durata attuale del backoff).
+      // Log ingresso quarantena (durata attuale del backoff).
       Serial.print("[");
       Serial.print(dhtChannelLabel(ch));
       Serial.print("] entering quarantine for ");

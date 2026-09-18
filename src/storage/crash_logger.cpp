@@ -234,7 +234,14 @@ void logCrash(const char *reason) {
                   " quarantinedUntil=" + String((unsigned long)s.quarantinedUntil) +
                   " maxReadUs=" + String((unsigned long)s.maxReadUs) +
                   " lastValidMs=" + String((unsigned long)s.lastValidMs) +
-                  " ageSec=" + String((long)dhtAgeSec(s)) + "\n";
+                  " ageSec=" + String((long)dhtAgeSec(s)) +
+                  // Cumulativi in-frame: INERTI a 0 con DHTNEW. Nel fork
+                  // sopravvivevano al reboot e discriminavano
+                  // linea statica (molte attese scadute) vs bitstream lento
+                  // (zero attese, maxPulseUs molto sopra il nominale).
+                  " frameLowTimeoutPulses=" + String((unsigned long)s.frameLowTimeoutPulses) +
+                  " frameHighTimeoutPulses=" + String((unsigned long)s.frameHighTimeoutPulses) +
+                  " maxPulseUs=" + String((unsigned long)s.maxPulseUs) + "\n";
     }
   }
 

@@ -147,10 +147,12 @@ extern void debugSDWriteResult(const char* file, bool ok, size_t written, uint32
 #define SD_CS 15   // CS; altri pin VSPI default: MOSI=23, MISO=19, SCK=18
 
 // LED integrato
-const int ledPin = 2;
+// const int ledPin = 2;   // LED integrato disabilitato; GPIO 2 è libero (DHT interno su GPIO 13)
 
 // Cambio pagina display
-#define BUTTON_PIN 13   // pulsante per cambiare pagina 
+// Pulsante su GPIO 4 (era GPIO 13, lasciato libero al DHT interno): semplice
+// ingresso digitale con INPUT_PULLUP.
+#define BUTTON_PIN 4    // pulsante per cambiare pagina 
 const uint8_t BRIGHT_LOW  = 0x05;    // luminosità bassa
 const uint8_t BRIGHT_HIGH = 0x7F;   // luminosità alta
 
@@ -1226,7 +1228,7 @@ void setup() {
     (rsn==ESP_RST_SDIO)?"SDIO":"OTHER";
   Serial.printf("Reset reason: %s (%d)\n", rsn_s, (int)rsn);
 
-  pinMode(ledPin, OUTPUT);
+  // pinMode(ledPin, OUTPUT);   // LED integrato disabilitato; GPIO 2 è libero (DHT interno su GPIO 13)
 
   // ✅ CREA SUBITO I MUTEX (servono a initSD/logCrash)
   sdMutex   = xSemaphoreCreateMutex();
@@ -1611,7 +1613,7 @@ server.on("/level", []() {
     lastLevelRequest = millis();
     Serial.println(">>> /level hit");
 
-    // --- THROTTLE: massimo ~30 Hz (33 ms) ---
+    // --- THROTTLE: massimo ~10 Hz (100 ms) ---
     static unsigned long lastLevelReply = 0;
     unsigned long nowL = millis();
     if (nowL - lastLevelReply < 100) {
@@ -3067,6 +3069,9 @@ void saveDiagSnapshot() {
   // ---- Telemetria DHT per-canale (solo diagnostica) ----
   // Ogni canale espone readEnabled/valid/reads/failures/failCount/
   // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec.
+  // I cumulativi in-frame (frameLowTimeoutPulses/frameHighTimeoutPulses/
+  // maxPulseUs) sono INERTI a 0 con DHTNEW: nel fork discriminavano linea
+  // statica vs bitstream lento.
   for (int ch = 0; ch < DHT_CHANNEL_COUNT; ch++) {
     const dhtSensor_t &s = dhtSensors[ch];
     const char* p = (ch == DHT_CHANNEL_INTERNAL) ? "dhtInt" : "dhtExt";
@@ -3080,6 +3085,13 @@ void saveDiagSnapshot() {
     f.printf("%s_maxReadUs=%lu\n",        p, (unsigned long)s.maxReadUs);
     f.printf("%s_lastValidMs=%lu\n",      p, (unsigned long)s.lastValidMs);
     f.printf("%s_ageSec=%ld\n",           p, (long)dhtAgeSec(s));
+    // Cumulativi in-frame (solo telemetria): INERTI a 0 con DHTNEW. Nel fork
+    // erano presenti anche nel flight recorder perché sopravvivevano a un
+    // reboot e permettevano di discriminare la causa (linea statica vs
+    // bitstream lento) a posteriori.
+    f.printf("%s_frameLowTimeoutPulses=%lu\n",  p, (unsigned long)s.frameLowTimeoutPulses);
+    f.printf("%s_frameHighTimeoutPulses=%lu\n", p, (unsigned long)s.frameHighTimeoutPulses);
+    f.printf("%s_maxPulseUs=%lu\n",             p, (unsigned long)s.maxPulseUs);
   }
 
   f.printf("ads_present=%u\n",          adsPresent ? 1 : 0);
@@ -3175,11 +3187,11 @@ void updateLevel() {
     static unsigned long lastRead = 0;
     unsigned long now = millis();
 
-    // ✅ Se l'utente NON è nella pagina livella → riduci frequenza a 15 Hz (66 ms)
+    // ✅ Se l'utente NON è nella pagina livella → riduci frequenza a ~8 Hz (120 ms)
     bool highRate = (now - lastLevelRequest < 1000);  // pagina livella aperta
 
     unsigned long period = highRate ? 40 : 120;  
-    // 30 ms → ~33 Hz (prima erano 50 Hz)
+    // 40 ms → ~25 Hz quando la pagina livella è aperta
     // 120 ms → ~8 Hz quando non serve frequenza alta
 
     if (now - lastRead < period) return;

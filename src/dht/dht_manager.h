@@ -2,20 +2,23 @@
 #define DHT_MANAGER_H
 
 // ============================================================
-// PROVA SPERIMENTALE DHTNEW (non migrazione definitiva)
+// GESTIONE SENSORI DHT (libreria DHTNEW)
 // ============================================================
 // Questo modulo pilota i due sensori (AM2301 esterno, DHT interno) con la
-// libreria DHTNEW di Rob Tillaart, vendorizzata in lib/DHTNEW/ e usata al
-// posto del fork Adafruit DHT (lib/DHT/, ancora presente e NON modificato).
+// libreria DHTNEW di Rob Tillaart, vendorizzata in lib/DHTNEW/ e adottata
+// come libreria di lettura in esercizio al posto del fork Adafruit DHT
+// (lib/DHT/, ancora presente e NON modificato come possibile rollback).
 //
-// SCOPO: verificare sul campo la qualità delle letture e la stabilità del
-// firmware. NON è una migrazione definitiva.
+// Storia: la migrazione a DHTNEW è stata introdotta il 2026-09-17 come prova
+// sul campo e si è chiusa con esito positivo (vedi AI_PROJECT_MEMORY.md);
+// è oggi la libreria di lettura attiva. Il fork resta disponibile solo come
+// riferimento/rollback e non è più percorso dal codice.
 //
 // INVARIATO rispetto al fork: array dhtSensors[], indice dei canali,
 // campi valid/temperature/humidity, contatori reads/failures, quarantena
 // (soglia e durata), task e watchdog.
 //
-// VOLUTAMENTE NON migrato in questa prova (i campi restano nel modello dati
+// NON alimentato da DHTNEW (i campi restano nel modello dati
 // per compatibilità con main.cpp, crash_logger e /api/boot, ma rimangono
 // INERTI a 0 perché DHTNEW non li espone): FrameDiag e i contatori di errore
 // per categoria. Lo stato grezzo della libreria è comunque esposto da
@@ -34,8 +37,9 @@
 // Definita in dht_manager.cpp come array dhtSensors[] e
 // accessibile a tutto il progetto tramite il canale DHT_CHANNEL_*.
 typedef struct {
-  DHTNEW dht;        // istanza fisica del sensore (DHTNEW, prova sperimentale)
-  bool  readEnabled; // false = letture fisiche sospese ([DIAG-WDT] DHT interno)
+  DHTNEW dht;        // istanza fisica del sensore (libreria DHTNEW)
+  bool  readEnabled; // false = letture fisiche sospese per questo canale
+                     // (guardia riutilizzabile; in esercizio entrambi i canali sono true)
 
   volatile float temperature; // °C — NAN se mai letto o non valido
   volatile float humidity;    // %  — NAN se mai letto o non valido
@@ -60,11 +64,12 @@ typedef struct {
   uint32_t lastValidMs;     // millis() dell'ultima lettura valida (0 = mai)
 
   // ---- Distribuzione errori per categoria (solo osservabilità) ----
-  // Contatori cumulativi da boot del fork (attribuiti con DHT::lastFailure()
-  // nel momento della lettura fisica fallita, etichette di dhtFailureLabel()).
+  // Contatori cumulativi da boot ereditati dal fork, dove erano attribuiti
+  // con DHT::lastFailure() nel momento della lettura fisica fallita
+  // (etichette di dhtFailureLabel()).
   // Sono pura telemetria per-canale: non influenzano lettura, timeout,
   // retry, quarantena o watchdog.
-  // [PROVA DHTNEW] INERTI in questa prova: DHTNEW non espone le categorie di
+  // INERTI con DHTNEW: la libreria non espone le categorie di
   // errore del fork, quindi questi contatori restano a 0. Per l'esito grezzo
   // della lettura fisica usare dhtLastStatus()/dhtFailureLabel().
   uint32_t pulseLowTimeouts;  // timeout sul pulse di start LOW (~80 us)
@@ -74,14 +79,14 @@ typedef struct {
   uint32_t checksumErrors;    // frame completo ma checksum non coerente
 
   // ---- Dettaglio in-frame dell'ULTIMO tentativo fisico (solo osservabilità) ----
-  // [PROVA DHTNEW] INERTI in questa prova: DHTNEW non espone FrameDiag,
+  // INERTI con DHTNEW: la libreria non espone FrameDiag,
   // questi campi restano a 0 e non vengono più alimentati.
   // Nel fork erano copiati da DHT::lastFrameDiag() a ogni lettura fisica:
-  // descrivevano COSA è
-  // avvenuto DENTRO il frame, non solo come è stato classificato. Serve perché
-  // FRAME_TIMEOUT e BIT_TIMEOUT possono descrivere lo stesso evento fisico
-  // (linea senza transizioni): il primo se il tetto dei 20 ms scatta prima del
-  // controllo di fine loop, il secondo se i timeout cadono in coda al frame.
+  // descrivevano COSA è avvenuto DENTRO il frame, non solo come è stato
+  // classificato. Servivano perché FRAME_TIMEOUT e BIT_TIMEOUT possono
+  // descrivere lo stesso evento fisico (linea senza transizioni): il primo se
+  // il tetto dei 20 ms scatta prima del controllo di fine loop, il secondo se
+  // i timeout cadono in coda al frame.
   //   - linea statica/morta  -> molti timeout, pochi pulse misurati;
   //   - bitstream lento/desincronizzato -> 80 pulse, 0 timeout, durate anomale.
   uint16_t lastFramePulses;       // pulse di dato misurati (0-80)
@@ -90,7 +95,7 @@ typedef struct {
   uint16_t lastFrameMaxPulseUs;   // durata massima pulse di dato (µs)
 
   // ---- Cumulativi in-frame da boot (solo osservabilità) ----
-  // [PROVA DHTNEW] INERTI in questa prova (restano a 0), come i campi sopra.
+  // INERTI con DHTNEW (restano a 0), come i campi sopra.
   // Nel fork erano la somma dei valori precedenti su tutte le letture fisiche.
   uint32_t frameLowTimeoutPulses;  // totale attese LOW scadute (cumulativo)
   uint32_t frameHighTimeoutPulses; // totale attese HIGH scadute (cumulativo)
@@ -100,7 +105,7 @@ typedef struct {
 // Canali sensori DHT (indici dell'array dhtSensors[])
 enum DhtChannel {
   DHT_CHANNEL_EXTERNAL = 0, // AM2301 (DHT21) su GPIO 14
-  DHT_CHANNEL_INTERNAL,     // DHT21 su GPIO 4
+  DHT_CHANNEL_INTERNAL,     // DHT21 su GPIO 13
   DHT_CHANNEL_COUNT
 };
 

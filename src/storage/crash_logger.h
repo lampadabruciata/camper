@@ -65,7 +65,8 @@ extern volatile uint32_t levelTaskMaxUs;
 extern volatile uint32_t displayTaskMaxUs;
 extern volatile uint32_t loopMaxUs;
 
-// Tempi massimi di esecuzione blocchi SensorLoop (µs)
+// Tempi massimi di esecuzione blocchi SensorLoop e DHTTask (µs)
+// (updateDHTMaxUs è misurato in DHTTask, non più in SensorLoop)
 extern volatile uint32_t updateCurrentAndVoltageMaxUs;
 extern volatile uint32_t readSolarCurrentMaxUs;
 extern volatile uint32_t updateDHTMaxUs;
@@ -92,7 +93,7 @@ void logBoot();
 
 // ----- API diagnostica crash (basadas en crashlog.txt, sin bootCount NVS) -----
 
-// Cuenta cuántos eventos hay en /crash_log.txt (0 si el archivo no existe o vacío)
+// Cuenta cuántos eventos hay en /crashlog.txt (0 si el archivo no existe o vacío)
 int countCrashEvents();
 
 // Devuelve todos los eventos del crash log (más reciente primero) en `out`

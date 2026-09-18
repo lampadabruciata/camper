@@ -40,13 +40,15 @@ Sistema di monitoraggio completo per un camper basato su ESP32 che gestisce:
 |---------|------|-----|-------------|
 | ADS1115 (x2) | ADC differenziale | I2C (0x48, 0x49) | Corrente batteria (shunt) + corrente solare |
 | HX711 (x2) | ADC carico | GPIO 32/33, 25/26 | Bilancia per bombole gas |
-| DHT21 (AM2301) | Temp/Hum | GPIO 14 (esterno), GPIO 4 (interno) | Temperatura/umidità ambiente |
+| DHT21 (AM2301) | Temp/Hum | GPIO 14 (esterno), GPIO 13 (interno) | Temperatura/umidità ambiente |
 | LIS3DH | Accelerometro | I2C (0x19) | Livellamento camper (roll/pitch) |
 | YF-S402C | Flussometro | GPIO 27 | Misuratore portata acqua (impulsi) |
 
 ### Attuatori
-- **LED integrato**: GPIO 2 (indicator)
-- **Pulsante**: GPIO 13 (cambio pagina display)
+- **LED integrato**: **disabilitato** (`ledPin` è commentato in `main.cpp`); GPIO 2 libero
+- **Pulsante**: GPIO 4 (cambio pagina display)
+
+> **Pinout in esercizio (dal test di isolamento del 2026-09-16):** DHT interno su GPIO 13 (in precedenza GPIO 4) e pulsante su GPIO 4 (in precedenza GPIO 13); GPIO 2 libero perché il LED integrato è disabilitato.
 
 ### Display
 - **Modello**: OLED SH1107 128x128
@@ -162,8 +164,8 @@ src/
 |------|----------|-------|------|----------------|-----------|
 | **SensorLoop** | 2 | 12288 | 0 | Lettura sensori, integrazione Ah, gestione grafici, salvataggio orario | 100ms (vTaskDelay) |
 | **DisplayTask** | 3 | 4096 | 1 | Rendering display OLED | Su notifica (max 5Hz) |
-| **LevelTask** | 4 | 4096 | 1 | Aggiornamento livella LIS3DH | 40ms (30Hz) o 100ms (10Hz) |
-| **DHTTask** | 1 | 4096 | 0 | Lettura DHT interno/esterno | 2 secondi |
+| **LevelTask** | 4 | 4096 | 1 | Aggiornamento livella LIS3DH | 40ms (attiva) / 100ms (idle); `updateLevel()` interno 40ms (fast) o 120ms (slow) |
+| **DHTTask** | 1 | 4096 | 0 | Lettura DHT interno/esterno (`updateDHT()`) | 10 secondi |
 | **PrefsTask** | 1 | 4096 | 0 | Scrittura asincrona su NVS | Su messaggi (debounce 30s) |
 | **SDWatchdog** | 1 | 2048 | 0 | Monitor stato SD card | 5 secondi |
 | **LateRestore** | 1 | 4096 | 0 | Ripristino grafico post-avvio | Esegue una volta (dopo 8s) |
@@ -228,7 +230,7 @@ struct PrefsMessage {
 ### WiFi
 - **Modalità**: Access Point (AP)
 - **SSID**: `camper_lamini`
-- **Password**: `12365478`
+- **Password**: `12345678`
 - **IP**: 192.168.4.1
 - **Canale**: 6
 - **Potenza TX**: 15dBm
@@ -278,7 +280,10 @@ struct PrefsMessage {
   - `/level_zero.txt` - Offset livella
   - `/crashlog.txt` - Log crash/reset
 
-### Struttura file `/ah_day.bin` (396 byte totali)
+### Struttura file `/ah_day.bin` (412 byte totali)
+
+Layout scritto da `saveAhToSD()` e letto da `restoreAhDayFromSD()` (`src/main.cpp`).
+
 ```
 struct AhDayHeader {
   uint16_t year;   // 2 byte
@@ -286,13 +291,17 @@ struct AhDayHeader {
   uint8_t  day;    // 1 byte
 };                 // 4 byte totali
 
-float ahHourlyToday[24];         // 96 byte
-float ahChargeHourlyToday[24];   // 96 byte
-float solAhHourlyToday[24];      // 96 byte
-float solAhHourlyYesterday[24];  // 96 byte
-float solAhTodayTotal_global;    // 4 byte
-float solAhYesterdayTotal_global; // 4 byte
-                                 // 396 byte totali
+float ahHourlyToday[24];             // 96 byte
+float ahChargeHourlyToday[24];       // 96 byte
+float solAhHourlyToday[24];          // 96 byte
+float solAhHourlyYesterday[24];      // 96 byte
+float ahTodayTotal_global;           // 4 byte
+float ahYesterdayTotal_global;       // 4 byte
+float ahChargeTodayTotal_global;     // 4 byte
+float ahChargeYesterdayTotal_global; // 4 byte
+float solAhTodayTotal_global;        // 4 byte
+float solAhYesterdayTotal_global;    // 4 byte
+                                     // 412 byte totali
 ```
 
 ### SPIFFS
@@ -337,15 +346,20 @@ float solAhYesterdayTotal_global; // 4 byte
 | `/chart.min.js` | GET | Libreria Chart.js |
 | `/data/live` | GET | Dati live (JSON) |
 | `/data/battery` | GET | Grafico batteria 24h (JSON) |
+| `/data/climate` | GET | Istogrammi clima 24h (JSON) |
 | `/data/solar` | GET | Dati solare (JSON) |
 | `/data/water` | GET | Dati acqua (JSON) |
 | `/data/gas` | GET | Dati gas (JSON) |
+| `/data/ah24h` | GET | Istogrammi orari Ah oggi/ieri + totali (JSON) |
 | `/data/ahLive` | GET | Ah ultimi 60 minuti (JSON) |
+| `/api/boot` | GET | Snapshot diagnostico di boot, incluse le telemetrie DHT (JSON) |
+| `/api/crash` | GET | Lista eventi del crash log, dal più recente (JSON) |
+| `/api/crashdetail` | GET | Blocco completo dell'evento `?id=N` (testo) |
 | `/setTime` | GET | Imposta orologio RTC |
 | `/setAh` | GET | Imposta capacità batteria Ah |
 | `/setAhMax` | GET | Imposta Ah massimi |
 | `/setEff` | GET | Imposta efficienza carica |
-| `/setTank` | GET | Imposta capacità serbatoio acqua |
+| `/setTank` | GET | Imposta i litri attualmente presenti nel serbatoio (`?litri=` o `?val=`); la capacità resta invariata |
 | `/manualGas1` | GET | Imposta livello gas bombola 1 |
 | `/manualGas2` | GET | Imposta livello gas bombola 2 |
 | `/level` | GET | Dati livella (roll/pitch) |
@@ -354,9 +368,14 @@ float solAhYesterdayTotal_global; // 4 byte
 | `/levelZeroClear` | GET | Cancella offset livella |
 | `/calSolarZero` | GET | Calibra offset solare |
 
+Note:
+- l'endpoint `/data` risponde **410** ("Endpoint /data dismesso");
+- gli endpoint del captive portal (`/generate_204`, `/gen_204`, `/hotspot-detect.html`, `/connecttest.txt`, `/ncsi.txt`) e `/favicon.ico` rispondono **200**;
+- gli handler `/data/*` e `/api/*` sono dichiarati in `web_manager.h` e definiti in `web_manager.cpp`, mentre le route sono registrate nel `setup()` di `main.cpp`.
+
 ### API
 - Tutte le API `/data/*` restituiscono JSON con dati numerici
-- Le API di configurazione accettano parametri query (`?val=10.5`)
+- Le API di configurazione accettano parametri query (`?val=10.5`; per `/setTank` `?litri=`/`?val=`, per `/manualGas1`/`/manualGas2` `?kg=`, per `/setTime` `?time=`)
 - Risposte: 200 OK, 400 Bad Request, 404 Not Found, 500 Server Error
 
 ### Gestione richieste
@@ -389,9 +408,9 @@ float solAhYesterdayTotal_global; // 4 byte
 - **Dipendenze**: HX711 library
 
 ### DHT
-- **Scopo**: Sensore temperatura/umidità
-- **File**: main.cpp (dhtInt, dhtExt)
-- **Dipendenze**: DHT sensor library
+- **Scopo**: Sensori temperatura/umidità (esterno + interno)
+- **File**: `src/dht/dht_manager.h` / `src/dht/dht_manager.cpp` — modello unificato `dhtSensors[]` con i canali `DHT_CHANNEL_EXTERNAL` / `DHT_CHANNEL_INTERNAL`
+- **Dipendenze**: **DHTNEW 0.5.5** (Rob Tillaart, vendorizzata in `lib/DHTNEW/`); il fork `lib/DHT/` ("Soluzione B") resta nel repository non utilizzato, come rollback
 
 ### WebServer
 - **Scopo**: Server HTTP per API
@@ -457,9 +476,9 @@ float solAhYesterdayTotal_global; // 4 byte
 ## # Stato progetto
 
 ### Aggiornamenti recenti
-- **Refactoring pagina Batteria**:
-  - Eliminato endpoint `/data/ah24h`
-  - Integrati dati Ah in `/data/battery`
+- **Pagina Batteria**:
+  - Endpoint `/data/ah24h` **attivo** (registrato in `main.cpp` → `handleDataAh24h`): la rimozione era temporanea e oggi è la fonte degli istogrammi orari Ah
+  - Dati Ah presenti anche in `/data/battery`
 - **Fix rollover giornaliero**:
   - Sostituito `prevHour > currentHour`
   - Con confronto day epoch RTC
@@ -467,15 +486,15 @@ float solAhYesterdayTotal_global; // 4 byte
   - Inizializzazione `currentYear/currentMonth/currentDay`
   - Da RTC al boot
 - **Diagnosi watchdog**:
-  - DHTTask disabilitato per test
-  - Uptime > 12.000.000 ms senza reboot
+  - DHTTask **oggi attivo** (`#define ENABLE_DHT_TASK true`): task dedicato, 10 s, Core 0, priorità 1
+  - Uptime > 12.000.000 ms senza reboot osservato con la lettura DHT sospesa (misura storica)
 
 ---
 
 ## # Problemi ancora aperti
 
-- **Confermare definitivamente correlazione DHT ↔ INT_WDT**
-- **Valutare sostituzione libreria DHT**
+- **Confermare su sessioni più lunghe l'esito positivo di DHTNEW**: è la libreria di lettura **in esercizio** dal 2026-09-17; in caso di rollback resta disponibile il fork "Soluzione B" in `lib/DHT/`, non più percorso dal codice
+- **Confermare definitivamente la correlazione DHT ↔ INT_WDT**: nessun nuovo `INT_WDT` osservato con DHTNEW nella finestra di prova
 
 ---
 
@@ -706,6 +725,8 @@ Configurazione considerata stabile e usata come riferimento per i successivi tes
 ### updateDHT()
 - Eseguito da `SensorLoop` ogni **2 secondi**.
 - Letture DHT riattivate tramite `SensorLoop`.
+
+> **Superato (aggiornamento 2026-09-16):** la lettura DHT è tornata nel task dedicato `DHTTask` (Core 0, priorità 1, periodo **10 s**) e `SensorLoop` non legge più dal bus DHT. Quanto descritto in questa sezione vale solo per lo stato del 2026-08-19.
 
 ### Rimozione definitiva
 - `readTempInternal()`
@@ -1394,5 +1415,116 @@ Lettura dei dati:
 
 
 ---
+---
+## 2026-09-17 - Prova DHTNEW 0.5.5: esito su 16 ore di esercizio
+
+### Oggetto della prova
+
+Prova sul campo di una libreria di lettura DHT alternativa al fork Adafruit "Soluzione B":
+
+- libreria **DHTNEW 0.5.5** di Rob Tillaart, vendorizzata in `lib/DHTNEW/` e **non modificata**;
+- il fork `lib/DHT/` (Soluzione B) resta nel repository, **non modificato**, come riferimento e possibile rollback;
+- la prova è pilotata da `src/dht/dht_manager.cpp`; all'introduzione era dichiarata come "PROVA SPERIMENTALE DHTNEW" nell'intestazione di `src/dht/dht_manager.h`, etichettatura rimossa nel cleanup del 2026-09-18 perché DHTNEW è nel frattempo diventata la libreria di lettura in esercizio.
+
+### Configurazione di test
+
+Hardware:
+
+- DHT esterno: **AM2301** (DHT21) su **GPIO 14**;
+- DHT interno: **DHT22** su **GPIO 13** (GPIO liberato spostando il pulsante di cambio pagina);
+- pulsante cambio pagina su **GPIO 4**; LED integrato (GPIO 2) ancora disabilitato.
+
+> Nota: questo pinout è quello **in esercizio** ed è riportato nella tabella "Hardware"; le sezioni precedenti a questa data indicano DHT interno su GPIO 4 e pulsante su GPIO 13, pinout ormai superato. I commenti nel codice che lo etichettavano "TEST TEMPORANEO 2026-09-16" sono stati rimossi nel cleanup del 2026-09-18.
+
+Software (invariato rispetto alla Soluzione B):
+
+- modello dati `dhtSensors[]` e canali `DHT_CHANNEL_EXTERNAL` / `DHT_CHANNEL_INTERNAL`;
+- quarantena: 5 errori consecutivi e backoff (1 minuto, `DHT_QUARANTINE_DURATION_MS`; valore in esercizio, il tag `[DIAG-TEMP]` è stato rimosso dal codice nel cleanup del 2026-09-18);
+- finestra di validità dell'ultimo dato valido: 60 s (`DHT_VALIDITY_TIMEOUT_MS`);
+- `DHTTask` dedicato (Core 0, priorità 1, periodo 10 s) e watchdog **invariati**: nessuna lettura DHT nel percorso critico.
+
+Adattamento alla nuova libreria:
+
+- `setType(22)`: tipo forzato per evitare l'autodetect bloccante (1 s e fino a 3 letture) alla prima `read()`;
+- `setWaitForReading(false)`: `read()` non bloccante, restituisce `DHTLIB_WAITING_FOR_READ` invece di attendere in loop;
+- una sola `read()` per canale per ciclo; i valori sono prelevati **solo** con `DHTLIB_OK`, perché in errore DHTNEW restituisce `DHTLIB_INVALID_VALUE` (-999) e non NAN: il contratto `!isnan` di `updateDhtChannel()` resta identico a quello del fork.
+
+### Risultati osservati (sessione notturna)
+
+- **uptime = 58682 s (~16 ore)** e **nessun reboot osservato durante la notte**;
+- `reads` coerente con il periodo del `DHTTask`: ~10,5 s per ciclo sulle ~16 ore (10 s nominali più i cicli saltati dalla quarantena).
+
+| Canale | Sensore | Pin | reads | failures | lastFailure | successo |
+|---|---|---|---|---|---|---|
+| DHT_EXT | AM2301 | GPIO 14 | 5600 | 348 | SENSOR_NOT_READY | ~93,8% |
+| DHT_INT | DHT22 | GPIO 13 | 5600 | 62 | NONE | ~98,9% |
+
+Lettura dei dati:
+
+- **DHT_INT**: `lastFailure = NONE` → l'ultima lettura fisica si è chiusa con `DHTLIB_OK`; 62 errori su 5600 tentativi (~1,1%);
+- **DHT_EXT**: `lastFailure = SENSOR_NOT_READY` → ultima lettura scartata prima dell'handshake (il sensore non ha portato LOW la linea entro la finestra di attesa); 348 errori su 5600 (~6,2%), compatibili con disturbi transitori sul ramo esterno, della stessa natura degli errori già visti con il fork (lì tutti classificati come `CHECKSUM_ERROR`);
+- **nessun `INT_WDT`** e nessun reboot nella finestra di osservazione.
+
+### Telemetria disponibile con DHTNEW
+
+- l'esito grezzo dell'ultima lettura fisica per canale è esposto in `/api/boot` come `lastFailure` (etichetta di `dhtFailureLabel()`) e `lastStatus` (codice `DHTLIB_*` grezzo memorizzato da `dht_manager.cpp`, perché DHTNEW non espone un getter dello stato);
+- i campi diagnostici avanzati del fork — `FrameDiag` (`lastFramePulses` / `lastFrameLowTimeouts` / `lastFrameHighTimeouts` / `lastFrameMaxPulseUs`) e i contatori per categoria (`pulseLowTimeouts` / `pulseHighTimeouts` / `frameTimeouts` / `bitTimeouts` / `checksumErrors`) con i cumulativi relativi (`frameLowTimeoutPulses` / `frameHighTimeoutPulses` / `maxPulseUs`) — **restano nel modello dati e in `/api/boot` per compatibilità, ma sono inerti a 0**: DHTNEW non li alimenta; solo i cumulativi (`frameLowTimeoutPulses` / `frameHighTimeoutPulses` / `maxPulseUs`) sono riportati anche in `/last_diag.txt` e `/crashlog.txt`;
+- conseguenza operativa: con DHTNEW **non è più possibile classificare la fase del frame** (handshake / bitstream / checksum). L'analisi per categoria del 2026-09-16 resta valida ma non è riproducibile senza riattivare il fork.
+
+### Confronto con la Soluzione B (fork Adafruit, sessioni 2026-09-16)
+
+| Grandezza | Soluzione B — fork (2026-09-16) | DHTNEW 0.5.5 (2026-09-17) |
+|---|---|---|
+| DHT esterno (GPIO 14) | reads 377 / failures 91 (24%) — tutti `checksumErrors` | reads 5600 / failures 348 (6,2%) |
+| DHT interno | reads 377 / failures 376 (99,7%) — `frameTimeouts` 361 + `bitTimeouts` 15 | reads 5600 / failures 62 (1,1%) — `lastFailure` NONE |
+| Stabilità (reboot / INT_WDT) | nessun INT_WDT, uptime di molte ore consecutive | nessun INT_WDT, uptime 58682 s (~16 h) |
+
+Avvertenze sul confronto:
+
+- i campioni non sono di pari ampiezza (377 vs 5600 letture per canale, ~15x): le percentuali della sessione DHTNEW sono molto più significative statisticamente;
+- il canale interno è cambiato anche **fisicamente** (GPIO 4 → GPIO 13): il confronto misura l'insieme *libreria + pin*, non la sola libreria;
+- entrambe le sessioni sono prive di reboot: la stabilità **non** distingue le due soluzioni.
+
+### Conclusioni tecniche
+
+- Il **DHT22 sul cavo lungo legge in modo molto affidabile**: 98,9% di successo su 5600 letture e ultima lettura `DHTLIB_OK`. Il quadro di "guasto duro e sistematico" della sessione 2026-09-16 **non si riproduce** in questa configurazione;
+- **DHTNEW produce risultati nettamente migliori del fork Soluzione B** su entrambi i canali (interno: 99,7% → 1,1% di errori; esterno: 24% → 6,2%) con la **stessa architettura** di lettura (task dedicato, quarantena, finestra di validità, watchdog);
+- **nessun nuovo `INT_WDT`** durante la prova: la migrazione della transazione fisica a DHTNEW non ha reintrodotto il rischio di reboot, coerente con l'ipotesi che il problema storico risiedesse nella sezione critica durante il frame;
+- il limite della prova è l'**osservabilità ridotta**: senza `FrameDiag` e senza i contatori per categoria non è possibile dire *dove* si è perso il dato, solo *che* la lettura è fallita;
+- i campi di telemetria del fork non sono stati rimossi dal modello dati: la scelta mantiene compilabili e confrontabili `main.cpp`, `web_manager.cpp` e `crash_logger.cpp` e rende immediato il ritorno alla classificazione per categoria.
+
+### Decisione progettuale attuale
+
+- **DHTNEW 0.5.5 è la libreria di lettura DHT attualmente in esercizio**: la prova si chiude con esito positivo su affidabilità e stabilità;
+- il fork **"Soluzione B"** (`lib/DHT/`) resta nel repository **non modificato**: un eventuale rollback è immediato e non richiede di rimettere in discussione i budget temporali già validati;
+- priorità invariata: **1. stabilità del firmware, 2. assenza di reboot, 3. affidabilità delle letture DHT**;
+- nessuna modifica a budget temporali, timeout, quarantena, `readEnabled`, `DHTTask` o watchdog: la lettura resta confinata nel task dedicato (10 s, Core 0, priorità 1), fuori dal percorso critico;
+- se in una futura indagine servisse la classificazione per fase del frame, la strada prevista è **riattivare temporaneamente il fork** (telemetria `FrameDiag` e contatori per categoria), non allargare i budget di DHTNEW;
+- l'ipotesi "problema elettrico locale su GPIO 4" non è riaperta da questa prova: nella configurazione di test il canale interno è su GPIO 13 e si comporta in modo affidabile. Resta da confermare su sessioni più lunghe prima di considerare chiusa l'indagine.
+
+---
+
+## 2026-09-18 - Cleanup commenti e note obsolete (nessuna modifica di comportamento)
+
+Intervento **solo su commenti e documentazione**, senza alcuna variazione di logica,
+costanti, timeout, task, watchdog, librerie o API.
+
+- rimossi i tag storici ormai fuorvianti dove non rappresentavano più lo stato reale:
+  `TEST TEMPORANEO 2026-09-16` (pinout DHT interno/pulsante), `DIAG-TEMP`
+  (quarantena 1 minuto), `DIAG-WDT` (`readEnabled`), `PROVA DHTNEW`;
+- aggiornati i commenti che presentavano la migrazione DHTNEW come "prova sperimentale"
+  o descrivevano il fork DHT come stato attuale: DHTNEW 0.5.5 è la libreria di lettura
+  in esercizio, il fork resta come rollback non percorso;
+- chiarito che i contatori di errore per categoria e i campi `FrameDiag`
+  (`lastFrame*`, `frame*TimeoutPulses`, `maxPulseUs`) sono **INERTI a 0** con DHTNEW
+  (presenti nel modello dati e in `/api/boot` solo per compatibilità);
+- allineati i commenti sulle frequenze della livella: throttle `/level` a ~10 Hz (100 ms),
+  `updateLevel()` a 40 ms (~25 Hz) con pagina livella aperta e 120 ms (~8 Hz) altrimenti;
+- annotato che `updateDHTMaxUs` è misurato in `DHTTask` (non più in `SensorLoop`);
+- la storia tecnica delle sessioni 2026-09-16 / 2026-09-17 resta invariata nelle sezioni
+  cronologiche datate di questo documento.
+
+---
+
 ---
 *Fine documento - Questo file è la memoria permanente del projecto e dovrebbe essere aggiornato ad ogni modifica significativa.*

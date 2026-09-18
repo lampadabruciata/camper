@@ -564,7 +564,7 @@ void handleDataBoot() {
   // quarantineCount/quarantinedUntil/maxReadUs/lastValidMs/ageSec,
   // lastFailure (etichetta dello stato dell'ultima lettura fisica) e
   // lastStatus (codice grezzo DHTLIB_* restituito da DHTNEW::read()).
-  // [PROVA DHTNEW] I contatori di errore per categoria del fork
+  // I contatori di errore per categoria del fork
   // (pulseLowTimeouts/pulseHighTimeouts/frameTimeouts/bitTimeouts/
   // checksumErrors) e il dettaglio in-frame dell'ultimo tentativo
   // (lastFramePulses/lastFrameLowTimeouts/lastFrameHighTimeouts/
@@ -593,8 +593,9 @@ void handleDataBoot() {
     co["frameTimeouts"]     = s.frameTimeouts;
     co["bitTimeouts"]       = s.bitTimeouts;
     co["checksumErrors"]    = s.checksumErrors;
-    // Dettaglio in-frame dell'ultimo tentativo fisico: rimuove l'ambiguità tra
-    // FRAME_TIMEOUT e BIT_TIMEOUT (possono descrivere lo stesso evento fisico).
+    // Dettaglio in-frame dell'ultimo tentativo fisico: INERTE a 0 con DHTNEW.
+    // Nel fork rimuoveva l'ambiguità tra FRAME_TIMEOUT e BIT_TIMEOUT
+    // (potevano descrivere lo stesso evento fisico).
     co["lastFramePulses"]       = s.lastFramePulses;
     co["lastFrameLowTimeouts"]  = s.lastFrameLowTimeouts;
     co["lastFrameHighTimeouts"] = s.lastFrameHighTimeouts;
