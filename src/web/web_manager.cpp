@@ -7,6 +7,7 @@
 #include <math.h>
 #include "storage/crash_logger.h"
 #include "dht/dht_manager.h"
+#include "wifi/wifi_monitor.h"
 #include <vector>
 
 // WebServer esterno (definito in main.cpp)
@@ -558,6 +559,44 @@ void handleDataBoot() {
   json["wifiClients"] = WiFi.softAPgetStationNum();
   json["adsPresent"]  = adsPresent;
   json["lisPresent"]  = lisPresent;
+
+  // ---- TELEMETRIA WiFi SoftAP (solo diagnostica) ----
+  // Contatori degli eventi di stazione (associazione/disassociazione) e di IP
+  // assegnato dal DHCP interno dell'AP, ultimo evento registrato e
+  // configurazione AP campionata all'avvio. Prodotta da src/wifi/wifi_monitor.*
+  // che si limita a osservare gli eventi: nessun recovery, nessun riavvio
+  // dell'AP, nessuna modifica a DHCP, captive portal, timeout o watchdog.
+  // Con Arduino core 2.0.17 (IDF v4.4) l'evento di disassociazione non riporta
+  // il reason code: non esiste quindi un campo con il motivo della disconnessione
+  // (resta visibile solo nel log del driver WiFi su Serial).
+  // probeRequestCount/lastProbeMs contano le probe request ricevute dall'AP
+  // (client che cercano l'SSID, anche senza arrivare all'associazione): la
+  // ricezione è abilitata da initWifiMonitor() azzerando il solo bit
+  // WIFI_EVENT_MASK_AP_PROBEREQRECVED della mask eventi del driver WiFi.
+  // Le probe request NON aggiornano "lastEvent"/"lastSta*" (vedi wifi_monitor.h).
+  // "lastEvent" disambigua i campi "last*" (ultima stazione vista); "lastStaMac"
+  // e "lastStaIp" valgono "--" finché l'evento corrispondente non è mai avvenuto.
+  // NON modifica il formato degli altri blocchi né il frontend.
+  wifiMonitorData_t wifiMon;
+  wifiMonitorGet(&wifiMon);
+
+  JsonObject wifiJson = json.createNestedObject("wifi");
+  wifiJson["wifiMode"]             = (int)wifiMon.wifiMode;
+  wifiJson["wifiModeName"]         = wifiMonitorModeLabel(wifiMon.wifiMode);
+  wifiJson["channel"]              = (int)wifiMon.channel;
+  wifiJson["txPower"]              = (int)wifiMon.txPower;
+  wifiJson["staConnectedCount"]    = wifiMon.staConnectedCount;
+  wifiJson["staDisconnectedCount"] = wifiMon.staDisconnectedCount;
+  wifiJson["dhcpAssignedCount"]    = wifiMon.dhcpAssignedCount;
+  wifiJson["probeRequestCount"]    = wifiMon.probeRequestCount;
+  wifiJson["lastEvent"]            = wifiMon.lastEventLabel;
+  wifiJson["lastStaAid"]           = wifiMon.lastStaAid;
+  wifiJson["lastStaMac"]           = wifiMon.lastStaMac;
+  wifiJson["lastStaIp"]            = wifiMon.lastStaIp;
+  wifiJson["lastAssocMs"]          = wifiMon.lastAssocMs;
+  wifiJson["lastDisconnMs"]        = wifiMon.lastDisconnMs;
+  wifiJson["lastDhcpMs"]           = wifiMon.lastDhcpMs;
+  wifiJson["lastProbeMs"]          = wifiMon.lastProbeMs;
 
   // ---- TELEMETRIA DHT PER-CANALE (solo diagnostica) ----
   // Ogni canale espone readEnabled/valid/reads/failures/failCount/
