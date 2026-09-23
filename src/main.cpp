@@ -31,6 +31,7 @@
 #include "storage/climate_storage.h"
 #include "storage/crash_logger.h"
 #include "dht/dht_manager.h"
+#include "wifi/wifi_monitor.h"
 
 SemaphoreHandle_t sdMutex;
 SemaphoreHandle_t i2cMutex; 
@@ -1465,6 +1466,14 @@ if (!adsSolarOk) {
   WiFi.softAP(ssid, password, 6, false, 8);
 
   WiFi.setTxPower(WIFI_POWER_15dBm);
+
+  // ✅ TELEMETRIA WiFi SoftAP (solo osservabilità): registra i callback degli
+  // eventi di stazione (associazione/disassociazione) e dell'IP assegnato dal
+  // DHCP, e campiona mode/canale/tx power reali.
+  // Chiamata subito dopo la creazione del SoftAP e dopo setTxPower(): non
+  // tocca la configurazione dell'AP né il comportamento della rete (nessun
+  // recovery, nessun restart dell'AP, nessuna modifica a DHCP/timeout).
+  initWifiMonitor();
 
   dnsServer.start(53, "*", local_IP);
 
