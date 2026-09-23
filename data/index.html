@@ -815,11 +815,9 @@ function showPage(name){
   if (tab) tab.classList.add("active");
 
   if (name === "livello") {
-      fetch("/levelSpeed?mode=fast").catch(()=>{});
       startFastLevelPolling();    
       levelFastLoop();            
   } else {
-      fetch("/levelSpeed?mode=slow").catch(()=>{});
       stopFastLevelPolling();
   }
 
@@ -1799,8 +1797,6 @@ document.addEventListener('visibilitychange', () => {
   if (!document.hidden) {
     syncTime();
     fetchPageData();
-  } else {
-    fetch("/levelSpeed?mode=slow").catch(()=>{});
   }
 });
 
@@ -2592,7 +2588,6 @@ function startFastLevelPolling() {
 
       const url = `/level?t=${performance.now() | 0}`;
       
-      console.log("FETCHING LEVEL:", url);
       const r = await fetch(url, {
 
         cache: 'no-store',

@@ -1611,7 +1611,6 @@ server.on("/level", []() {
 
     // Segna accesso per exclusive mode
     lastLevelRequest = millis();
-    Serial.println(">>> /level hit");
 
     // --- THROTTLE: massimo ~10 Hz (100 ms) ---
     static unsigned long lastLevelReply = 0;
@@ -2030,10 +2029,6 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     float minuteDischargeRaw = ahMinuteDischargeAccum;
     float minuteChargeRaw    = ahMinuteChargeAccum;
 
-    // ✅ DIAGNOSTICA RUMORE (valori RAW prima del deadband)
-    // Si stampa SEMPRE ad ogni cambio di minuto, anche se raw = 0.
-    Serial.printf("[AH-NOISE]\nminuteDischarge=%.5f\nminuteCharge=%.5f\n", minuteDischargeRaw, minuteChargeRaw);
-
     // ============================================================
     // ✅ DEADBAND ANTI-RUMORE — PUNTO UNICO DI AGGREGAZIONE
     // I valori sotto AH_MINUTE_DEADBAND_AH NON vengono scritti né
@@ -2054,7 +2049,6 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
     // ✅ salvi nei buffer live (ultimi 60 minuti)
     ahMinuteDischarge[minuteIndex] = minuteDischarge;
     ahMinuteCharge[minuteIndex]    = minuteCharge;
-    Serial.printf("MINUTE AH -> DIS: %.5f  CHG: %.5f\n", minuteDischarge, minuteCharge);
 
     minuteIndex = (minuteIndex + 1) % 60;
 
@@ -2200,14 +2194,6 @@ if (thisMinuteEpoch != lastMinuteEpoch) {
         climateHumExt[cIdx]  = cliExtOk ? cliExt.humidity    : NAN;
 
         climateEpochMinutes[cIdx] = nowT / 60;   // epoch in minuti UTC
-
-        // [CLIM] debug temporaneo — 1 riga per minuto (solo quando si scrive)
-        Serial.printf("[CLIM] idx=%d", cIdx);
-        Serial.printf(" tInt=");  if (cliIntOk) Serial.printf("%.1f", cliInt.temperature); else Serial.print("nan");
-        Serial.printf(" tExt=");  if (cliExtOk) Serial.printf("%.1f", cliExt.temperature); else Serial.print("nan");
-        Serial.printf(" hInt=");  if (cliIntOk) Serial.printf("%.0f", cliInt.humidity);    else Serial.print("nan");
-        Serial.printf(" hExt=");  if (cliExtOk) Serial.printf("%.0f", cliExt.humidity);    else Serial.print("nan");
-        Serial.println();
 
         climateSampleIndex = (climateSampleIndex + 1) % climateSamples;
     }
