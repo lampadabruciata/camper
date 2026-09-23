@@ -3,6 +3,8 @@
 #include <esp_system.h>
 #include <vector>
 
+#include "wifi/wifi_monitor.h"
+
 // ---- TEMPO: usa le stesse funzioni di time_manager.cpp ----
 // (utcToLocal/nowEpoch/updateDST) per esprimere l'ora in LOCALE (CET/CEST),
 // esattamente come fanno rtc= in last_diag.txt e dateTime della UI.
@@ -278,6 +280,21 @@ void logCrash(const char *reason) {
 
   xSemaphoreGive(sdMutex);
   crashLogging = false;
+
+  // ----------- TELEMETRIA WIFI SOFTAP (ridotta per crash log) -----------
+  // Versione compatta della telemetria WiFi, coerente con il block "WiFiClients"
+  // esistente. Non aggiunge probeRequestCount/lastProbeMs/channel/txPower.
+  {
+    wifiMonitorData_t wm;
+    wifiMonitorGet(&wm);
+    newEvent += "WiFiMode=" + String((int)wm.wifiMode) +
+                " staConnectedCount=" + String((unsigned long)wm.staConnectedCount) +
+                " lastEvent=" + String(wm.lastEventLabel) +
+                " lastAssocMs=" + String((unsigned long)wm.lastAssocMs) +
+                " lastDisconnMs=" + String((unsigned long)wm.lastDisconnMs) +
+                " dhcpAssignedCount=" + String((unsigned long)wm.dhcpAssignedCount) +
+                " lastDhcpMs=" + String((unsigned long)wm.lastDhcpMs) + "\n";
+  }
 }
 
 void logBoot() {

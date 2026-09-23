@@ -3088,6 +3088,24 @@ void saveDiagSnapshot() {
     f.printf("%s_frameHighTimeoutPulses=%lu\n", p, (unsigned long)s.frameHighTimeoutPulses);
     f.printf("%s_maxPulseUs=%lu\n",             p, (unsigned long)s.maxPulseUs);
   }
+  // ---- Telemetria WiFi SoftAP (solo diagnostica) ----
+  // Additiva e puramente osservativa: salva i contatori e gli ultimi timestamp
+  // esposti da wifi_monitor senza modificare alcun comportamento WiFi/DHCP.
+  {
+    wifiMonitorData_t wm;
+    wifiMonitorGet(&wm);
+    f.printf("wifiMode=%u\n",                 (unsigned)wm.wifiMode);
+    f.printf("staConnectedCount=%lu\n",       (unsigned long)wm.staConnectedCount);
+    f.printf("staDisconnectedCount=%lu\n",    (unsigned long)wm.staDisconnectedCount);
+    f.printf("dhcpAssignedCount=%lu\n",       (unsigned long)wm.dhcpAssignedCount);
+    f.printf("probeRequestCount=%lu\n",       (unsigned long)wm.probeRequestCount);
+    f.printf("lastEvent=%s\n",                wm.lastEventLabel);
+    f.printf("lastAssocMs=%lu\n",             (unsigned long)wm.lastAssocMs);
+    f.printf("lastDisconnMs=%lu\n",           (unsigned long)wm.lastDisconnMs);
+    f.printf("lastDhcpMs=%lu\n",              (unsigned long)wm.lastDhcpMs);
+    f.printf("lastProbeMs=%lu\n",             (unsigned long)wm.lastProbeMs);
+  }
+
 
   f.printf("ads_present=%u\n",          adsPresent ? 1 : 0);
   f.printf("lis_present=%u\n",          lisPresent ? 1 : 0);
