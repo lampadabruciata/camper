@@ -7,7 +7,6 @@
 // Dichiarazioni esterne (definite in main.cpp)
 extern SemaphoreHandle_t sdMutex;
 extern bool initSD();
-extern void logCrash(const char *reason);
 extern void i2cRecoverBus(void);
 extern bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name);
 
@@ -55,19 +54,73 @@ bool scaleSafeTare(HX711 &scale) {
 }
 
 // ============================================================
-// MUTEX TIMEOUT LOGGER (max 1 messaggio al secondo per mutex)
+// TELEMETRIA TIMEOUT MUTEX (RAM statica: nessuna allocazione,
+// nessuna I/O, nessuna attesa)
 // ============================================================
-bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name) {
-  // Prova a prendere il mutex entro timeoutMs
-  if (xSemaphoreTake(m, pdMS_TO_TICKS(timeoutMs)) == pdTRUE)
-    return true;
+// Definizioni (dichiarazioni in gas_manager.h). Il percorso di timeout tocca
+// solo queste variabili + Serial: resta eseguibile anche con heap esaurito o
+// SD occupata, che era la causa del PANIC via logCrash().
+mutexTimeoutStats_t mutexTimeoutStats[MUTEX_SLOT_COUNT];
 
-  // Timeout: logga al massimo 1 volta al secondo
-  static unsigned long lastPrint = 0;
+// Scadenza della finestra "cambio bombola" (0 = finestra mai aperta).
+// Impostata da handleManualGas1()/handleManualGas2() in main.cpp.
+unsigned long gasManualChangeUntilMs = 0;
+
+// Nome -> slot di telemetria. Il primo carattere filtra quasi tutti i casi
+// prima di strcmp (nessuna allocazione, costo trascurabile).
+static uint8_t mutexSlotFromName(const char *name) {
+  if (name) {
+    if (name[0] == 'h' && strcmp(name, "hx")  == 0) return MUTEX_SLOT_HX;
+    if (name[0] == 's' && strcmp(name, "sd")  == 0) return MUTEX_SLOT_SD;
+    if (name[0] == 'i' && strcmp(name, "i2c") == 0) return MUTEX_SLOT_I2C;
+  }
+  return MUTEX_SLOT_OTHER;
+}
+
+// Secondi trascorsi dall'ultimo timeout dello slot; -1 se mai avvenuto.
+long mutexTimeoutAgeSec(uint8_t slot) {
+  if (slot >= MUTEX_SLOT_COUNT) return -1;
+  uint32_t last = mutexTimeoutStats[slot].lastMs;
+  if (last == 0) return -1;              // 0 = nessun timeout registrato
+  return (long)((millis() - last) / 1000UL);
+}
+
+// ============================================================
+// MUTEX TIMEOUT: telemetria statica + log seriale rate-limited
+// ============================================================
+// Il timeout NON chiama piu' logCrash(): logCrash() alloca (String/std::vector)
+// e nel picco di timeout durante il cambio bombola quella allocazione poteva
+// fallire (std::bad_alloc -> std::terminate -> abort) causando il PANIC.
+bool takeMutexWarn(SemaphoreHandle_t m, uint32_t timeoutMs, const char *name) {
+  const uint8_t slot = mutexSlotFromName(name);
+
+  // Prova a prendere il mutex entro timeoutMs
+  if (xSemaphoreTake(m, pdMS_TO_TICKS(timeoutMs)) == pdTRUE) {
+    // Presa riuscita: azzera la catena di timeout consecutivi dello slot
+    mutexTimeoutStats[slot].consecutive = 0;
+    return true;
+  }
+
+  // ---- Timeout: aggiornamento telemetria (sempre, inline) ----
   unsigned long now = millis();
+  mutexTimeoutStats_t &st = mutexTimeoutStats[slot];
+  st.count++;
+  st.consecutive++;
+  if (st.consecutive > st.maxConsec) st.maxConsec = st.consecutive;
+  st.lastMs = (uint32_t)now;
+  // Timeout dentro la finestra di cambio bombola (handleManualGas1/2): sono
+  // fisiologici (tare + get_units(10) tengono hxMutex ~1 s) e vanno distinti
+  // da quelli anomali. Confronto modulare: corretto anche al wrap-around di
+  // millis() (~49 giorni) e finche' la finestra non e' mai stata aperta (0).
+  if (gasManualChangeUntilMs != 0 &&
+      (int32_t)(gasManualChangeUntilMs - (uint32_t)now) > 0) {
+    st.countDuringGasChange++;
+  }
+
+  // Log seriale: al massimo 1 messaggio al secondo (invariato)
+  static unsigned long lastPrint = 0;
   if (now - lastPrint >= 1000) {
     Serial.printf("[WARN] MUTEX '%s' TIMEOUT (> %u ms)\n", name ? name : "?", (unsigned)timeoutMs);
-    logCrash("Mutex timeout");   // scrive su /crashlog.txt lo stato corrente
 
     // Se e il bus I2C che va in timeout ripetutamente, tenta recovery
     if (name && strcmp(name, "i2c") == 0) {

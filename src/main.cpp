@@ -1109,6 +1109,12 @@ void handleManualGas1() {
 
   float kg = server.arg("kg").toFloat();
 
+  // Finestra "cambio bombola": i timeout mutex che cadono qui dentro sono
+  // fisiologici (tare + get_units(10) tengono hxMutex ~1 s durante il cambio)
+  // e vengono conteggiati a parte in /last_diag.txt (hx_to_duringGasChange).
+  // Solo RAM: nessuna allocazione, nessuna I/O, nessun cambio di timeout.
+  gasManualChangeUntilMs = millis() + GAS_MANUAL_CHANGE_WINDOW_MS;
+
   // Aggiorna immediatamente logica cumulativa
   gasInitial1 = kg;
   gasConsumed1 = 0.0f;
@@ -1137,6 +1143,10 @@ void handleManualGas2() {
   }
 
   float kg = server.arg("kg").toFloat();
+
+  // Finestra "cambio bombola" (vedi handleManualGas1): i timeout mutex che
+  // cadono qui dentro sono fisiologici e contati in hx_to_duringGasChange.
+  gasManualChangeUntilMs = millis() + GAS_MANUAL_CHANGE_WINDOW_MS;
 
   gasInitial2 = kg;
   gasConsumed2 = 0.0f;
@@ -3109,6 +3119,25 @@ void saveDiagSnapshot() {
   // altrimenti i trigger non stanno scrivendo piu'.
   f.printf("lastLitersSaveMs=%lu\n",            (unsigned long)lastLitersSaveMs);
   f.printf("lastSavedLiters=%.3f\n",           lastLitersSavedValue);
+
+  // ---- Telemetria timeout mutex (solo diagnostica) ----
+  // Contatori in RAM statica aggiornati da takeMutexWarn(): nessuna
+  // allocazione, nessuna I/O e nessuna attesa nel percorso di timeout
+  // (sostituisce logCrash("Mutex timeout"), che sotto pressione di memoria
+  // poteva terminare in PANIC per std::bad_alloc).
+  // ageSec = secondi dall'ultimo timeout dello slot (-1 = mai avvenuto).
+  // duringGasChange = timeout caduti nella finestra di cambio bombola
+  // (GAS_MANUAL_CHANGE_WINDOW_MS) aperta da handleManualGas1/2.
+  {
+    f.printf("hx_to=%lu\n",                 (unsigned long)mutexTimeoutStats[MUTEX_SLOT_HX].count);
+    f.printf("hx_to_maxConsec=%lu\n",       (unsigned long)mutexTimeoutStats[MUTEX_SLOT_HX].maxConsec);
+    f.printf("hx_to_ageSec=%ld\n",          mutexTimeoutAgeSec(MUTEX_SLOT_HX));
+    f.printf("hx_to_duringGasChange=%lu\n", (unsigned long)mutexTimeoutStats[MUTEX_SLOT_HX].countDuringGasChange);
+    f.printf("sd_to=%lu\n",                 (unsigned long)mutexTimeoutStats[MUTEX_SLOT_SD].count);
+    f.printf("sd_to_ageSec=%ld\n",          mutexTimeoutAgeSec(MUTEX_SLOT_SD));
+    f.printf("i2c_to=%lu\n",                (unsigned long)mutexTimeoutStats[MUTEX_SLOT_I2C].count);
+    f.printf("other_to=%lu\n",              (unsigned long)mutexTimeoutStats[MUTEX_SLOT_OTHER].count);
+  }
 
   f.printf("dhtReads=%lu\n",            (unsigned long)dhtReads);
   f.printf("dhtReadFailures=%lu\n",     (unsigned long)dhtReadFailures);
