@@ -562,32 +562,49 @@ void handleDataBoot() {
 
   // ---- TELEMETRIA WiFi SoftAP (solo diagnostica) ----
   // Contatori degli eventi di stazione (associazione/disassociazione) e di IP
-  // assegnato dal DHCP interno dell'AP, ultimo evento registrato e
-  // configurazione AP campionata all'avvio. Prodotta da src/wifi/wifi_monitor.*
-  // che si limita a osservare gli eventi: nessun recovery, nessun riavvio
-  // dell'AP, nessuna modifica a DHCP, captive portal, timeout o watchdog.
+  // assegnato dal DHCP interno dell'AP, ultimo evento registrato, configurazione
+  // AP campionata all'avvio e stato immediato dell'AP. Prodotta da
+  // src/wifi/wifi_monitor.* che si limita a osservare gli eventi: nessun
+  // recovery, nessun riavvio dell'AP, nessuna modifica a DHCP, captive portal,
+  // timeout o watchdog.
   // Con Arduino core 2.0.17 (IDF v4.4) l'evento di disassociazione non riporta
   // il reason code: non esiste quindi un campo con il motivo della disconnessione
-  // (resta visibile solo nel log del driver WiFi su Serial).
-  // probeRequestCount/lastProbeMs contano le probe request ricevute dall'AP
-  // (client che cercano l'SSID, anche senza arrivare all'associazione): la
-  // ricezione è abilitata da initWifiMonitor() azzerando il solo bit
-  // WIFI_EVENT_MASK_AP_PROBEREQRECVED della mask eventi del driver WiFi.
+  // (resta visibile solo nel log del driver WiFi su Serial). Non si usa
+  // ARDUINO_EVENT_WIFI_STA_DISCONNECTED a tal scopo: descrive l'ESP32 in
+  // modalità STATION verso un AP esterno, NON i client del SoftAP (vd.
+  // wifi_monitor.h).
+  // "activeStaNum" è il numero di stazioni associate ADESSO e "activeStaMacs" il
+  // loro elenco (facoltativo); insieme a "dmaMinFree"/"dmaLargestBlock" (memoria
+  // DMA disponibile, da cui il driver WiFi preleva i buffer RX) distinguono "mai
+  // associato" da "associato e poi caduto" da "driver senza memoria per i buffer".
+  // probeRequestCount/lastProbeMs restano nel JSON per compatibilità ma sono
+  // INERTI a 0: la ricezione delle probe request è disabilitata a compilazione
+  // (WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0), come dichiara "probeRequestEnabled".
   // Le probe request NON aggiornano "lastEvent"/"lastSta*" (vedi wifi_monitor.h).
-  // "lastEvent" disambigua i campi "last*" (ultima stazione vista); "lastStaMac"
-  // e "lastStaIp" valgono "--" finché l'evento corrispondente non è mai avvenuto.
+  // "lastEvent" disambigua i campi "last*"; "lastStaMac" e "lastStaIp" valgono
+  // "--" finché l'evento corrispondente non è mai avvenuto.
   // NON modifica il formato degli altri blocchi né il frontend.
   wifiMonitorData_t wifiMon;
   wifiMonitorGet(&wifiMon);
+
+  // Elenco MAC delle stazioni attive (facoltativo, vedi wifiMonitorGetStaMacList).
+  char activeStaMacs[WIFI_MONITOR_STA_MAC_LIST_BUF];
+  (void)wifiMonitorGetStaMacList(activeStaMacs, sizeof(activeStaMacs));
 
   JsonObject wifiJson = json.createNestedObject("wifi");
   wifiJson["wifiMode"]             = (int)wifiMon.wifiMode;
   wifiJson["wifiModeName"]         = wifiMonitorModeLabel(wifiMon.wifiMode);
   wifiJson["channel"]              = (int)wifiMon.channel;
   wifiJson["txPower"]              = (int)wifiMon.txPower;
+  wifiJson["activeStaNum"]         = (int)wifiMon.activeStaNum;
+  wifiJson["activeStaMacs"]        = activeStaMacs;
+  wifiJson["dmaMinFree"]           = (unsigned long)wifiMon.dmaMinFree;
+  wifiJson["dmaLargestBlock"]      = (unsigned long)wifiMon.dmaLargestBlock;
   wifiJson["staConnectedCount"]    = wifiMon.staConnectedCount;
   wifiJson["staDisconnectedCount"] = wifiMon.staDisconnectedCount;
   wifiJson["dhcpAssignedCount"]    = wifiMon.dhcpAssignedCount;
+  // Disabilitato a compilazione: il contatore resta a 0 (vd. wifi_monitor.h).
+  wifiJson["probeRequestEnabled"]  = WIFI_MONITOR_ENABLE_PROBE_REQUEST ? true : false;
   wifiJson["probeRequestCount"]    = wifiMon.probeRequestCount;
   wifiJson["lastEvent"]            = wifiMon.lastEventLabel;
   wifiJson["lastStaAid"]           = wifiMon.lastStaAid;

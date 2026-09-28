@@ -6,11 +6,18 @@
 // esp_wifi_get_event_mask()/esp_wifi_set_event_mask() e per il bit
 // WIFI_EVENT_MASK_AP_PROBEREQRECVED usati in initWifiMonitor().
 #include "esp_wifi.h"
+// heap_caps_get_free_size/heap_caps_get_largest_free_block: stato della memoria
+// DMA-capable, da cui il driver WiFi preleva i buffer RX/TX. Sono query in sola
+// lettura su strutture interne dell'heap (nessun lock, nessuna attesa).
+#include "esp_heap_caps.h"
 #include <stdio.h>
 #include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+// SemaphoreHandle_t/xSemaphoreCreateMutex: protegge la wifi_sta_list_t condivisa
+// usata da wifiMonitorGetStaMacList() (chiamata da due task).
+#include "freertos/semphr.h"
 
 // ============================================================
 // STATO INTERNO (scritto solo dal callback eventi, letto dai task)
@@ -22,6 +29,8 @@ typedef struct {
   uint32_t staConnectedCount;
   uint32_t staDisconnectedCount;
   uint32_t dhcpAssignedCount;
+  // Con WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 nessun callback di probe viene
+  // registrato: i due campi restano a 0 e sono inerti (vd. wifi_monitor.h).
   uint32_t probeRequestCount;
 
   uint8_t  lastEvent;      // vedi enum WifiMonLastEvent
@@ -160,6 +169,10 @@ static void wifiMonitorEventHandler(arduino_event_t *event) {
       // campo dell'evento viene registrato (mac/rssi non esposti) e lastEvent
       // resta l'ultimo evento di STAZIONE: come gli altri case, due sole
       // assegnazioni a 32 bit dentro la sezione critica.
+      // Il case resta nel codice ma è IRREACHABLE con
+      // WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 (nessun callback registrato per
+      // quell'evento): è lasciato per non perdere il comportamento se il flag
+      // viene riattivato.
       s_wifiMonState.probeRequestCount++;
       s_wifiMonState.lastProbeMs = nowMs;
       break;
@@ -171,6 +184,50 @@ static void wifiMonitorEventHandler(arduino_event_t *event) {
   }
 
   taskEXIT_CRITICAL(&s_wifiMonMux);
+}
+
+// ============================================================
+// RIARMO MASK PROBE REQUEST (supporto recovery SoftAP)
+// ============================================================
+// Estratto dalla sequenza di initWifiMonitor() per essere riusato quando il
+// SoftAP viene ricreato (softAPdisconnect() -> softAPConfig() -> softAP()):
+// il deinit/reinit del driver riporta la mask eventi al default, quindi con la
+// feature attiva la ricezione delle probe andrebbe riabilitata.
+// Si azzera SOLO il bit WIFI_EVENT_MASK_AP_PROBEREQRECVED: gli altri bit
+// restano invariati.
+// NON registra callback: la registrazione resta esclusiva di initWifiMonitor(),
+// così una chiamata ripetuta (es. dopo ogni recovery) non può duplicare gli
+// handler né raddoppiare i contatori di telemetria.
+//
+// CON WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 (configurazione in esercizio) tutta
+// la funzione è un NO-OP: si legge la mask solo per poterla riportare nei log e
+// si restituisce true senza chiamare MAI esp_wifi_set_event_mask(). Il bit di
+// probe resta quindi al default del driver, che continua a filtrare l'evento:
+// il recovery non riabilita nulla e non perde nulla, perché il contatore non
+// era alimentato in partenza.
+bool wifiMonitorRearmProbeEventMask(uint32_t *maskBeforeOut, uint32_t *maskAfterOut) {
+  uint32_t maskBefore = 0;
+
+  if (esp_wifi_get_event_mask(&maskBefore) != ESP_OK) {
+    // Difensivo (getter non disponibile): nel driver la mask di default ha come
+    // unico bit WIFI_EVENT_MASK_AP_PROBEREQRECVED, quindi azzerare la mask
+    // equivale a rimuovere il solo filtro delle probe request.
+    maskBefore = 0;
+  }
+
+  if (maskBeforeOut != NULL) *maskBeforeOut = maskBefore;
+
+#if WIFI_MONITOR_ENABLE_PROBE_REQUEST
+  const uint32_t maskAfter = maskBefore & ~((uint32_t)WIFI_EVENT_MASK_AP_PROBEREQRECVED);
+  if (maskAfterOut != NULL) *maskAfterOut = maskAfter;
+
+  // Solo mask eventi: qui non esiste alcuna WiFi.onEvent().
+  return (esp_wifi_set_event_mask(maskAfter) == ESP_OK);
+#else
+  // Feature disabilitata: nessuna scrittura, la mask in vigore resta maskBefore.
+  if (maskAfterOut != NULL) *maskAfterOut = maskBefore;
+  return true;
+#endif
 }
 
 // ============================================================
@@ -191,46 +248,55 @@ void initWifiMonitor() {
   // al valore intero più vicino (15 dBm in esercizio).
   s_wifiMonTxPower = (int8_t)(((int32_t)WiFi.getTxPower() + 2) / 4);
 
-  // ---- Abilitazione della ricezione delle probe request (mask eventi) ----
+  // ---- Ricezione delle probe request (solo se abilitata a compilazione) ----
   // Con IDF v4.4 (Arduino ESP32 2.0.17) il bit WIFI_EVENT_MASK_AP_PROBEREQRECVED
   // è la mask di default del driver: finché è impostato, WIFI_EVENT_AP_PROBEREQRECVED
   // non viene consegnato al system event handler e quindi non raggiunge nemmeno
   // il core Arduino (che pure sa tradurlo in ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED).
-  // Si legge la mask corrente e si azzera SOLO quel bit: gli altri bit restano
-  // invariati. L'effetto è circoscritto alla NOTIFICA degli eventi al software:
-  // nessun tocco ad AP, beacon/probe response, SSID, canale, potenza, DHCP,
-  // captive portal o comportamento di rete, nessun recovery. L'API è utilizzabile
-  // a runtime (richiede solo esp_wifi_init, già avvenuto con WiFi.softAP()).
+  // Con WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 (configurazione in esercizio) NON
+  // si tocca la mask e NON si registra il callback: la funzione è un no-op che
+  // si limita a riportare la mask letta. Con il flag a 1 si azzera il SOLO bit,
+  // centralizzato in wifiMonitorRearmProbeEventMask() (stessa funzione usata dal
+  // recovery del SoftAP dopo softAPdisconnect()/softAP()): una sola
+  // implementazione, nessuna divergenza tra init e recovery. In entrambi i casi
+  // cambia unicamente la NOTIFICA degli eventi al software: nessun tocco ad AP,
+  // beacon/probe response, SSID, canale, potenza, DHCP, captive portal o
+  // comportamento di rete. L'API è utilizzabile a runtime (richiede solo
+  // esp_wifi_init, già avvenuto con WiFi.softAP()).
   uint32_t maskBefore = 0;
   uint32_t maskAfter  = 0;
-  if (esp_wifi_get_event_mask(&maskBefore) == ESP_OK) {
-    maskAfter = maskBefore & ~((uint32_t)WIFI_EVENT_MASK_AP_PROBEREQRECVED);
-  } else {
-    // Difensivo (getter non disponibile): nel driver la mask di default ha come
-    // unico bit WIFI_EVENT_MASK_AP_PROBEREQRECVED, quindi azzerare la mask
-    // equivale a rimuovere il solo filtro delle probe request.
-    maskAfter = 0;
-  }
-  esp_err_t maskErr = esp_wifi_set_event_mask(maskAfter);
 
-  // ---- Registrazione dei quattro eventi SoftAP (sola notifica) ----
+#if WIFI_MONITOR_ENABLE_PROBE_REQUEST
+  const bool maskOk = wifiMonitorRearmProbeEventMask(&maskBefore, &maskAfter);
+  Serial.printf("[WIFI-MON] probe request: abilitata, mask 0x%08x -> 0x%08x (%s)\n",
+                (unsigned)maskBefore, (unsigned)maskAfter,
+                maskOk ? "OK" : "set_event_mask FALLITA");
+#else
+  // Feature disabilitata: la funzione è un no-op (legge la mask, non la
+  // scrive) e soprattutto NON registra il callback di probe qui sotto.
+  (void)wifiMonitorRearmProbeEventMask(&maskBefore, &maskAfter);
+  Serial.printf("[WIFI-MON] probe request: DISABILITATA (flag di compilazione), "
+                "mask invariata 0x%08x, filtro probe %s\n",
+                (unsigned)maskBefore,
+                (maskBefore & (uint32_t)WIFI_EVENT_MASK_AP_PROBEREQRECVED)
+                  ? "attivo (driver scarta l'evento)" : "rimosso");
+#endif
+
+  // ---- Registrazione degli eventi SoftAP (sola notifica) ----
   // WiFi.onEvent() aggiunge un handler alla catena già gestita dal core: non
   // riconfigura l'AP, non tocca il DHCP server, non tocca il captive portal.
-  // Quattro registrazioni filtrate sullo stesso callback evitano di essere
-  // invocati per gli altri eventi WiFi.
+  // Registrazioni filtrate sullo stesso callback: evitano di essere invocati per
+  // gli altri eventi WiFi.
   // La registrazione avviene poche decine di ms dopo la creazione del SoftAP:
-  // nessuna associazione può andare persa; per le probe request la perdita
-  // possibile è limitata ai primissimi ms di vita dell'AP (prima della chiamata
-  // sopra il filtro del driver è ancora attivo), quindi i contatori vanno letti
-  // come "da telemetria attiva", non come totale dall'accensione.
+  // nessuna associazione può andare persa, quindi i contatori vanno letti come
+  // "da telemetria attiva", non come totale dall'accensione.
   WiFi.onEvent(wifiMonitorEventHandler, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
   WiFi.onEvent(wifiMonitorEventHandler, ARDUINO_EVENT_WIFI_AP_STADISCONNECTED);
   WiFi.onEvent(wifiMonitorEventHandler, ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED);
+#if WIFI_MONITOR_ENABLE_PROBE_REQUEST
   WiFi.onEvent(wifiMonitorEventHandler, ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED);
+#endif
 
-  Serial.printf("[WIFI-MON] probe request: mask 0x%08x -> 0x%08x (%s)\n",
-                (unsigned)maskBefore, (unsigned)maskAfter,
-                (maskErr == ESP_OK) ? "ricezione abilitata" : "set_event_mask FALLITA");
   Serial.printf("[WIFI-MON] telemetria SoftAP attiva: mode=%s ch=%u tx=%d dBm\n",
                 wifiMonitorModeLabel(s_wifiMonMode),
                 (unsigned)s_wifiMonChannel,
@@ -274,6 +340,98 @@ void wifiMonitorGet(wifiMonitorData_t *out) {
   out->wifiMode = s_wifiMonMode;
   out->channel  = s_wifiMonChannel;
   out->txPower  = s_wifiMonTxPower;
+
+  // ---- Stato immediato AP e disponibilità memoria DMA ----
+  // Query in sola lettura, eseguite FUORI dalla sezione critica e senza alcuna
+  // allocazione: sono il "quadro" del guasto "SSID visibile ma il telefono non
+  // si collega".
+  //   activeStaNum = 0 con staConnectedCount > 0  -> associazione avvenuta e poi
+  //                                                   caduta (vedi lastDisconnMs)
+  //   activeStaNum = 0 con staConnectedCount = 0  -> mai associato
+  //   dmaLargestBlock vicino a 0                   -> il driver WiFi non ha un
+  //                                                   blocco contiguo da cui
+  //                                                   allocare i buffer RX
+  out->activeStaNum = (uint8_t)WiFi.softAPgetStationNum();
+  out->dmaMinFree   = (uint32_t)heap_caps_get_free_size(MALLOC_CAP_DMA);
+  out->dmaLargestBlock =
+      (uint32_t)heap_caps_get_largest_free_block(MALLOC_CAP_DMA);
+}
+
+// ============================================================
+// ELENCO MAC DELLE STAZIONI ATTIVE (facoltativo)
+// ============================================================
+// esp_wifi_ap_get_sta_list() chiede la lista al task WiFi e ATTENDE la risposta
+// (è bloccante, ~un round-trip): per questo NON può stare in una sezione
+// critica (taskENTER_CRITICAL disabiletterebbe gli interrupt per tutta la
+// durata dell'attesa).
+// I due caller sono task distinti (loop() per /last_diag.txt, task del
+// WebServer per /api/boot) e possono sovrapporsi, quindi la wifi_sta_list_t
+// condivisa (~200 byte: ESP_WIFI_MAX_CONN_NUM = 15 voci da 8+ byte) è protetta
+// da un mutex FreeRTOS. Il buffer è statico (niente peso sullo stack dei
+// caller, che sono path con attenzione esplicita allo stack) e la formattazione
+// avviene DOPO la copia locale delle MAC, fuori dal mutex.
+// Se il mutex non è disponibile si esce con lista vuota: è telemetria
+// facoltativa, non vale la pena insistere né aspettare.
+uint8_t wifiMonitorGetStaMacList(char *dst, size_t dstLen) {
+  if (dst == NULL || dstLen == 0) return 0;
+  dst[0] = '\0';
+
+#if WIFI_MONITOR_ENABLE_STA_MAC_LIST
+  static SemaphoreHandle_t s_staListMtx = NULL;
+  static wifi_sta_list_t   s_staList;
+  // Inizializzazione pigra: la prima chiamata (da un task, mai da una ISR)
+  // crea il mutex. La corsia è risolta dal fatto che la creazione avviene una
+  // sola volta e il risultato è ripubblicato solo a scrittura atomica.
+  if (s_staListMtx == NULL) {
+    SemaphoreHandle_t created = xSemaphoreCreateMutex();
+    if (created == NULL) return 0;   // esaurimento memoria: lista non disponibile
+    s_staListMtx = created;
+  }
+
+  if (xSemaphoreTake(s_staListMtx, pdMS_TO_TICKS(50)) != pdTRUE) {
+    return 0;  // altro caller sta interrogando il driver: lista vuota
+  }
+
+  // Copia locale delle MAC dentro il mutex, così la formattazione (che è la
+  // parte lenta) avviene senza bloccare nessuno.
+  uint8_t macs[WIFI_MONITOR_MAX_STA_MAC][6];
+  uint8_t n = 0;
+  const esp_err_t err = esp_wifi_ap_get_sta_list(&s_staList);
+  if (err == ESP_OK) {
+    // num è validato dal driver, ma resta un valore letto da codice nativo:
+    // si blocca comunque all'intervallo utile [0, WIFI_MONITOR_MAX_STA_MAC].
+    int num = s_staList.num;
+    if (num < 0) num = 0;
+    if (num > WIFI_MONITOR_MAX_STA_MAC) num = WIFI_MONITOR_MAX_STA_MAC;
+    for (int i = 0; i < num; i++) {
+      memcpy(macs[i], s_staList.sta[i].mac, 6);
+    }
+    n = (uint8_t)num;
+  }
+
+  xSemaphoreGive(s_staListMtx);
+
+  if (err != ESP_OK) return 0;  // lista non disponibile: stringa vuota
+
+  // Formattazione fuori dal mutex: snprintf su buffer piccolo e noto (max 8
+  // voci da 17 caratteri + separatore = 143 caratteri).
+  uint8_t written = 0;
+  for (uint8_t i = 0; i < n; i++) {
+    // 18 = 17 caratteri di "aa:bb:cc:dd:ee:ff" + separatore, più il terminatore.
+    if ((size_t)written + 18u + 1u > dstLen) break;
+    const int k = snprintf(dst + written, dstLen - written, "%s%02x:%02x:%02x:%02x:%02x:%02x",
+                           (i == 0) ? "" : ",",
+                           (unsigned)macs[i][0], (unsigned)macs[i][1],
+                           (unsigned)macs[i][2], (unsigned)macs[i][3],
+                           (unsigned)macs[i][4], (unsigned)macs[i][5]);
+    if (k <= 0) break;
+    written += (uint8_t)k;
+  }
+  return written;
+#else
+  // Elenco non compilato: activeStaNum resta comunque disponibile.
+  return 0;
+#endif
 }
 
 // ============================================================

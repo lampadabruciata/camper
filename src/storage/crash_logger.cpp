@@ -284,6 +284,10 @@ void logCrash(const char *reason) {
   // ----------- TELEMETRIA WIFI SOFTAP (ridotta per crash log) -----------
   // Versione compatta della telemetria WiFi, coerente con il block "WiFiClients"
   // esistente. Non aggiunge probeRequestCount/lastProbeMs/channel/txPower.
+  // Aggiunge invece activeStaNum e dmaLargestBlock: sono i due dati che
+  // discriminano "mai associato" da "associato e poi caduto" da "driver WiFi
+  // senza un blocco contiguo per i buffer RX" (le probe request sono disabilitate
+  // a compilazione, vedi WIFI_MONITOR_ENABLE_PROBE_REQUEST).
   {
     wifiMonitorData_t wm;
     wifiMonitorGet(&wm);
@@ -293,7 +297,9 @@ void logCrash(const char *reason) {
                 " lastAssocMs=" + String((unsigned long)wm.lastAssocMs) +
                 " lastDisconnMs=" + String((unsigned long)wm.lastDisconnMs) +
                 " dhcpAssignedCount=" + String((unsigned long)wm.dhcpAssignedCount) +
-                " lastDhcpMs=" + String((unsigned long)wm.lastDhcpMs) + "\n";
+                " lastDhcpMs=" + String((unsigned long)wm.lastDhcpMs) +
+                " activeStaNum=" + String((int)wm.activeStaNum) +
+                " dmaLargestBlock=" + String((unsigned long)wm.dmaLargestBlock) + "\n";
   }
 }
 

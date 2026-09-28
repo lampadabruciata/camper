@@ -3089,15 +3089,38 @@ void saveDiagSnapshot() {
     f.printf("%s_maxPulseUs=%lu\n",             p, (unsigned long)s.maxPulseUs);
   }
   // ---- Telemetria WiFi SoftAP (solo diagnostica) ----
-  // Additiva e puramente osservativa: salva i contatori e gli ultimi timestamp
-  // esposti da wifi_monitor senza modificare alcun comportamento WiFi/DHCP.
+  // Additiva e puramente osservativa: salva i contatori, gli ultimi timestamp e
+  // lo stato immediato dell'AP esposti da wifi_monitor, senza modificare alcun
+  // comportamento WiFi/DHCP.
+  //
+  // Lettura del blocco (guasto "SSID visibile ma il telefono non si collega"):
+  //   activeStaNum=0 + staConnectedCount=0  -> mai associato (lato AP)
+  //   activeStaNum=0 + staConnectedCount>0  -> associato e poi caduto
+  //   dmaLargestBlock piccolo                 -> il driver WiFi non trova un
+  //                                              blocco contiguo per i buffer RX
+  //   probeRequestCount/probeRequestEnabled  -> contatore probe INERTE: la
+  //                                              ricezione è disabilitata a
+  //                                              compilazione, resta a 0
   {
     wifiMonitorData_t wm;
     wifiMonitorGet(&wm);
+
+    // Elenco MAC delle stazioni attive (facoltativo): stringa vuota se la
+    // feature è spenta o se il driver non espone la lista.
+    char staMacs[WIFI_MONITOR_STA_MAC_LIST_BUF];
+    (void)wifiMonitorGetStaMacList(staMacs, sizeof(staMacs));
+
     f.printf("wifiMode=%u\n",                 (unsigned)wm.wifiMode);
+    f.printf("activeStaNum=%u\n",             (unsigned)wm.activeStaNum);
+    f.printf("activeStaMacs=%s\n",            staMacs);
+    f.printf("dmaMinFree=%lu\n",              (unsigned long)wm.dmaMinFree);
+    f.printf("dmaLargestBlock=%lu\n",         (unsigned long)wm.dmaLargestBlock);
     f.printf("staConnectedCount=%lu\n",       (unsigned long)wm.staConnectedCount);
     f.printf("staDisconnectedCount=%lu\n",    (unsigned long)wm.staDisconnectedCount);
     f.printf("dhcpAssignedCount=%lu\n",       (unsigned long)wm.dhcpAssignedCount);
+    // Campi mantenuti nel formato ma disabilitati: restano a 0 e il flag
+    // dice perché leggerli così (vd. WIFI_MONITOR_ENABLE_PROBE_REQUEST).
+    f.printf("probeRequestEnabled=%d\n",      WIFI_MONITOR_ENABLE_PROBE_REQUEST ? 1 : 0);
     f.printf("probeRequestCount=%lu\n",       (unsigned long)wm.probeRequestCount);
     f.printf("lastEvent=%s\n",                wm.lastEventLabel);
     f.printf("lastAssocMs=%lu\n",             (unsigned long)wm.lastAssocMs);
@@ -3115,6 +3138,120 @@ void saveDiagSnapshot() {
 
   Serial.println("[DIAG] snapshot saved");
 }
+
+// =======================================================
+// =====  WIFI RECOVERY LIVELLO 1 (MANUALE - NESSUN TRIGGER)  =====
+// =======================================================
+// Riavvio CONTROLLATO del SoftAP: esegue il ciclo che il driver WiFi richiede
+// per uscire dallo stato osservato in cui l'SSID resta visibile, il telefono
+// mostra "connessione scaduta" e nessuna nuova associazione riesce:
+//   WiFi.softAPdisconnect(true) -> WiFi.softAPConfig() -> WiFi.softAP()
+//   -> WiFi.setTxPower()
+//
+// NOTA: la diagnosi di quello stato NON usa probeRequestCount, che è disabilitato
+// (vedi /last_diag.txt: activeStaNum, activeStaMacs, dmaLargestBlock).
+//
+// NON è collegata ad alcun trigger automatico: non è chiamata da setup() né da
+// loop(), non ha timer/task e non è esposta da alcun endpoint HTTP. Esiste come
+// primitiva manuale, pronta per un eventuale trigger di livello superiore.
+//
+// TELEMETRIA: i callback onEvent() NON vengono registrati una seconda volta.
+// Il deinit/reinit dell'AP riporta al default la mask eventi del driver, quindi
+// dopo la ricreazione viene richiamata wifiMonitorRearmProbeEventMask(): con
+// WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 (configurazione in esercizio) è un no-op
+// che NON scrive la mask, perché il contatore probe non è alimentato; con la
+// feature attiva riabilita la sola ricezione delle probe. In entrambi i casi i
+// tre handler restano quelli registrati una sola volta da initWifiMonitor():
+// nessun contatore raddoppiato.
+//
+// Ordine e parametri AP identici a setup() (canale 6, SSID non nascosto, max 8
+// client, 15 dBm). setHostname()/persistent(false) NON vengono ripetuti: non
+// fanno parte del ciclo di (ri)creazione dell'AP e restano quelli di setup().
+// Nessun reboot dell'ESP32; nessuna modifica a DHCP, captive portal, storage,
+// watchdog o mutex.
+//
+// Ritorna true solo se TUTTE le verifiche finali (punto e) passano:
+//   WiFi.getMode()     == WIFI_MODE_AP
+//   WiFi.softAPIP()    == 192.168.4.1
+//   WiFi.getTxPower()  == WIFI_POWER_15dBm (15 dBm)
+// L'esito dei singoli passi resta comunque visibile nel log [WIFI-REC].
+bool wifiRecoveryLevel1() {
+  // ---- Parametri AP (stessi valori di setup()) ----
+  const int          apChannel = 6;
+  const int          apHidden  = 0;    // SSID visibile
+  const int          apMaxConn = 8;
+  const wifi_power_t apTxPower = WIFI_POWER_15dBm;
+  const IPAddress    apLocalIp(192, 168, 4, 1);
+  const IPAddress    apGateway(192, 168, 4, 1);
+  const IPAddress    apSubnet (255, 255, 255, 0);
+
+  // ---- Attese controllate ----
+  // 300 ms: il driver deve completare la disattivazione dell'AP prima di
+  //         accettare la nuova configurazione.
+  // 200 ms: dopo la ricreazione, prima di leggere mode/IP/TX power reali.
+  const uint32_t disconnectSettleMs = 300;
+  const uint32_t recreateSettleMs   = 200;
+
+  // ---- (a) Stato iniziale ----
+  const uint8_t   modeBefore = (uint8_t)WiFi.getMode();
+  const IPAddress ipBefore   = WiFi.softAPIP();
+  Serial.printf("[WIFI-REC] L1 inizio: mode=%s softAPIP=%s\n",
+                wifiMonitorModeLabel(modeBefore), ipBefore.toString().c_str());
+
+  // ---- (b) Disattivazione dell'AP corrente ----
+  const bool discOk = WiFi.softAPdisconnect(true);
+  delay(disconnectSettleMs);
+  Serial.printf("[WIFI-REC] L1 passo 1/5 softAPdisconnect(true)=%s (attesa %u ms)\n",
+                discOk ? "OK" : "FALLITA", (unsigned)disconnectSettleMs);
+
+  // ---- (c) Ricreazione dell'AP ----
+  const bool cfgOk = WiFi.softAPConfig(apLocalIp, apGateway, apSubnet);
+  Serial.printf("[WIFI-REC] L1 passo 2/5 softAPConfig(%s)=%s\n",
+                apLocalIp.toString().c_str(), cfgOk ? "OK" : "FALLITA");
+
+  const bool apOk = WiFi.softAP(ssid, password, apChannel, apHidden, apMaxConn);
+  Serial.printf("[WIFI-REC] L1 passo 3/5 softAP(ssid=%s ch=%d maxConn=%d)=%s\n",
+                ssid, apChannel, apMaxConn, apOk ? "OK" : "FALLITA");
+
+  const bool txSetOk = WiFi.setTxPower(apTxPower);
+  Serial.printf("[WIFI-REC] L1 passo 4/5 setTxPower(15 dBm)=%s\n",
+                txSetOk ? "OK" : "FALLITA");
+
+  // ---- (d) Riarmo mask probe request (NESSUN callback riregistrato) ----
+  // Con WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0 la funzione è un no-op: legge la
+  // mask (per il log) ma non la scrive, quindi il bit di probe resta al default.
+  uint32_t maskBefore = 0;
+  uint32_t maskAfter  = 0;
+  const bool maskOk = wifiMonitorRearmProbeEventMask(&maskBefore, &maskAfter);
+  Serial.printf("[WIFI-REC] L1 passo 5/5 probe mask=%s (0x%08x -> 0x%08x, invariata=%s), callback non riregistrati\n",
+                maskOk ? "OK" : "FALLITA",
+                (unsigned)maskBefore, (unsigned)maskAfter,
+                (maskBefore == maskAfter) ? "si" : "no");
+
+  // ---- (e) Verifica dello stato finale ----
+  delay(recreateSettleMs);
+
+  const uint8_t      modeAfter = (uint8_t)WiFi.getMode();
+  const IPAddress    ipAfter   = WiFi.softAPIP();
+  const wifi_power_t txAfter   = WiFi.getTxPower();
+
+  const bool modeOk = (modeAfter == WIFI_MODE_AP);
+  const bool ipOk   = (ipAfter   == apLocalIp);
+  const bool txOk   = (txAfter   == apTxPower);
+
+  Serial.printf("[WIFI-REC] L1 verifica: mode=%s(%s) softAPIP=%s(%s) tx=%d/4dBm=%ddBm(%s)\n",
+                wifiMonitorModeLabel(modeAfter), modeOk ? "OK" : "FALLITA",
+                ipAfter.toString().c_str(),     ipOk   ? "OK" : "FALLITA",
+                (int)txAfter, (int)(((int32_t)txAfter + 2) / 4),
+                txOk ? "OK" : "FALLITA");
+
+  const bool ok = modeOk && ipOk && txOk;
+  Serial.printf("[WIFI-REC] L1 stato finale: mode=%s softAPIP=%s tx=%ddBm -> %s\n",
+                wifiMonitorModeLabel(modeAfter), ipAfter.toString().c_str(),
+                (int)(((int32_t)txAfter + 2) / 4), ok ? "SUCCESS" : "FALLITA");
+  return ok;
+}
+
 void loop() {
 
     uint32_t loopStartUs = micros();
