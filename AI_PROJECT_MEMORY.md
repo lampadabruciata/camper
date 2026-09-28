@@ -1,7 +1,7 @@
 # AI Project Memory - ESP32 Camper Monitoring System
 
 > **Documento generato per:** Nuova AI che deve comprendere il progetto senza leggere tutto il codice  
-> **Ultimo aggiornamento:** 10 luglio 2026  
+> **Ultimo aggiornamento:** 28 settembre 2026  
 > **Versione firmware:** main.cpp (3168 righe)
 
 ---
@@ -1523,6 +1523,64 @@ costanti, timeout, task, watchdog, librerie o API.
 - annotato che `updateDHTMaxUs` è misurato in `DHTTask` (non più in `SensorLoop`);
 - la storia tecnica delle sessioni 2026-09-16 / 2026-09-17 resta invariata nelle sezioni
   cronologiche datate di questo documento.
+
+## 2026-09-28 - Release WIFI-DIAG-01: baseline approvata per i test sul campo
+
+**Release:** tag annotato `WIFI-DIAG-01` (branch `backup-pre-bootlog-fix`, commit `5be243c`).
+Questa voce è **solo documentazione**: nessuna modifica al firmware, nessuna nuova
+feature, nessuna nuova TODO tecnica, nessuna modifica alla configurazione PlatformIO.
+
+### Contenuto della release
+
+- **Monitoraggio `AP_PROBEREQRECVED` disabilitato**: `WIFI_MONITOR_ENABLE_PROBE_REQUEST = 0`
+  in `wifi_monitor.h`. La mask eventi del driver resta al default (il driver continua a
+  scartare l'evento) e **nessun** `WiFi.onEvent(ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED)`
+  viene registrato; `probeRequestCount` / `lastProbeMs` restano nel modello dati e nelle
+  API **ineri a 0**, solo per compatibilità con `/last_diag.txt` e `crashlog.txt`;
+- **aggiunti `activeStaNum` e `activeStaMacs`**: quante stazioni sono associate *adesso*
+  (`WiFi.softAPgetStationNum()`) e il loro elenco MAC, compilato da
+  `wifiMonitorGetStaMacList()` nel buffer `WIFI_MONITOR_STA_MAC_LIST_BUF`;
+- **aggiunte le metriche DMA `dmaMinFree` e `dmaLargestBlock`**: byte DMA liberi
+  (`heap_caps_get_free_size(MALLOC_CAP_DMA)`) e blocco contiguo più grande
+  (`heap_caps_get_largest_free_block(MALLOC_CAP_DMA)`), da cui il driver WiFi preleva i
+  buffer RX. È la coppia che distingue "mai associato" / "associato e poi caduto" /
+  "driver senza un blocco contiguo per i buffer RX";
+- **migliorata la telemetria SoftAP**: i campi sono esposti sia in `/last_diag.txt` sia in
+  `/api/boot` (`wifi.activeStaNum`, `wifi.activeStaMacs`, `wifi.dmaMinFree`,
+  `wifi.dmaLargestBlock`); `activeStaNum` e `dmaLargestBlock` sono riportati anche nel
+  blocco compatto del flight recorder (`crash_logger.cpp`);
+- **persistenza automatica acqua**: `/last_liters.txt` viene riscritto quando
+  `deltaLiters >= WATER_SAVE_DELTA_L` **oppure** quando è trascorso
+  `WATER_SAVE_PERIOD_MS` con un delta sopra `WATER_SAVE_EPSILON_L`. I riferimenti
+  `lastLitersSavedValue` / `lastLitersSaveMs` sono ricalcolati da `restoreLitersFromSD()`
+  (avvio) e da `handleSetTank()` (set manuale), così il primo giro di `SensorLoop` non
+  riscrive un file già identico;
+- **perdita massima di acqua dopo reboot ridotta da circa 100 L a circa 0.5 L**.
+
+### Verifiche eseguite
+
+- Flash OK
+- WiFi OK
+- Web UI OK
+- `activeStaNum` OK
+- `activeStaMacs` OK
+- `dmaMinFree` OK
+- `dmaLargestBlock` OK
+- `probeRequestEnabled=false` OK (booleano in `/api/boot`; lo stesso campo è stampato
+  come `0` in `/last_diag.txt`)
+- Persistenza acqua verificata (`lastLitersSaveMs` / `lastSavedLiters` in `/last_diag.txt`)
+
+### Decisione
+
+Build approvata per i test sul campo. Il tag `WIFI-DIAG-01` (commit `5be243c`) è la
+**baseline** dei test: ogni anomalia successiva va riferita a quel commit.
+
+### Prossima azione
+
+Nessuna modifica firmware prevista. Raccogliere dati **solamente** in caso di:
+
+- nuovo degrado WiFi;
+- nuova anomalia reale osservata.
 
 ---
 
