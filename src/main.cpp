@@ -301,6 +301,29 @@ volatile float totalLitersConsumed = 0.0f;
 volatile float lastFlowLmin = 0.0f;
 volatile float remainingLiters = tankCapacity;
 
+// ---- PERSISTENZA AUTOMATICA /last_liters.txt ----
+// Stesso schema usato per il GAS (updateGas(): periodo 30 s) e per gli Ah
+// (delta 0.05): due trigger, scrittura sempre tramite saveLastLitersToSD().
+// Nessuna task, nessun timer, nessun formato di file nuovo.
+//   TRIGGER A - delta consumi >= 0.5 L  (scatto immediato)
+//   TRIGGER B - >= 30 s dall'ultima scrittura E delta > 0.01 L
+// L'epsilon di 0.01 L (10x la risoluzione del file, print(liters, 3)) evita
+// di riscrivere un file identico: a serbatoio fermo NON si scrive MAI.
+// Copre i due casi limite: consumo veloce (A) e consumo lento/dotto (B).
+// La perdita massima dopo un reboot resta quindi 0.5 L, oppure il consumo
+// degli ultimi 30 s (il valore maggiore fra i due).
+const float    WATER_SAVE_DELTA_L    = 0.5f;     // TRIGGER A: delta che scatta subito
+const float    WATER_SAVE_EPSILON_L  = 0.01f;    // TRIGGER B: variazione minima
+const uint32_t WATER_SAVE_PERIOD_MS  = 30000UL;  // TRIGGER B: periodo minimo
+
+// Riferimenti dell'ultima scrittura (solo RAM, stile lastGasSave1/lastGasSave2):
+//   lastLitersSavedValue = litri realmente contenuti in /last_liters.txt
+//   lastLitersSaveMs     = millis() dell'ultimo salvataggio
+// Ricalcolati da restoreLitersFromSD() (avvio) e handleSetTank() (set manuale),
+// così il primo giro di SensorLoop non riscrive un file già identico.
+volatile float    lastLitersSavedValue = 0.0f;
+volatile uint32_t lastLitersSaveMs     = 0;
+
 // =======================================================
 // ==========  LOG GRAFICO TENSIONE (24h)  ===============
 // =======================================================
@@ -1994,6 +2017,27 @@ void SensorLoop(void *pvParameters) {
             if (totalLitersConsumed > tankCapacity) totalLitersConsumed = tankCapacity;
             remainingLiters = tankCapacity - totalLitersConsumed;
 
+            // ---- PERSISTENZA AUTOMATICA /last_liters.txt ----
+            // Scrive solo quando scatta UNO dei due trigger (OR):
+            //   A) delta consumi >= 0.5 L dal valore salvato
+            //   B) >= 30 s dall'ultima scrittura E delta > 0.01 L
+            // L'epsilon in B e' la condizione che azzera le scritture a
+            // serbatoio fermo (o pieno, o vuoto): senza variazione il file
+            // risulterebbe identico, quindi non lo si riscrive.
+            // Copre i due casi limite: consumo veloce (A) e consumo lento/dotto
+            // (B). Riusa il ciclo "ogni secondo" gia' esistente: nessuna task
+            // ne' timer nuovi, e la scrittura resta affidata a
+            // saveLastLitersToSD() (mutex SD interno, tmp + rename atomico,
+            // formato di /last_liters.txt invariato).
+            float deltaLiters = fabsf(totalLitersConsumed - lastLitersSavedValue);
+            if (deltaLiters >= WATER_SAVE_DELTA_L ||
+                ((now - lastLitersSaveMs) >= WATER_SAVE_PERIOD_MS &&
+                 deltaLiters > WATER_SAVE_EPSILON_L)) {
+                saveLastLitersToSD(totalLitersConsumed);
+                lastLitersSavedValue = totalLitersConsumed;
+                lastLitersSaveMs     = now;
+            }
+
             // GAS
             // [DIAG] misura tempo updateGas() bilancia 1
             uint32_t tGas1 = micros();
@@ -3056,6 +3100,15 @@ void saveDiagSnapshot() {
   f.printf("saveAhStateToSDMaxUs=%lu\n",         (unsigned long)saveAhStateToSDMaxUs);
   f.printf("saveAhToSDMaxUs=%lu\n",              (unsigned long)saveAhToSDMaxUs);
   f.printf("saveGraphToSDMaxUs=%lu\n",           (unsigned long)saveGraphToSDMaxUs);
+
+  // ---- Telemetria persistenza acqua (/last_liters.txt) ----
+  // lastLitersSaveMs = millis() dell'ultimo salvataggio automatico
+  // lastSavedLiters  = litri realmente contenuti nel file al momento del
+  //                    salvataggio (non il valore corrente in RAM).
+  // L'eta' si ricava da millis= - lastLitersSaveMs: deve restare <= ~30000 ms,
+  // altrimenti i trigger non stanno scrivendo piu'.
+  f.printf("lastLitersSaveMs=%lu\n",            (unsigned long)lastLitersSaveMs);
+  f.printf("lastSavedLiters=%.3f\n",           lastLitersSavedValue);
 
   f.printf("dhtReads=%lu\n",            (unsigned long)dhtReads);
   f.printf("dhtReadFailures=%lu\n",     (unsigned long)dhtReadFailures);

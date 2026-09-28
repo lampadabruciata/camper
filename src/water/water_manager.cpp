@@ -16,6 +16,12 @@ extern volatile float totalLitersConsumed;
 extern volatile float remainingLiters;
 extern float tankCapacity;
 
+// Riferimenti di persistenza automatica (definiti in main.cpp): servono a far
+// partire i trigger A/B gia' "in pari" dopo l'avvio o dopo un /setTank, cosi'
+// da non riscrivere subito su SD un file identico.
+extern volatile float    lastLitersSavedValue;
+extern volatile uint32_t lastLitersSaveMs;
+
 // ============================================================
 // SALVATAGGIO LITRI ACQUA SU SD
 // ============================================================
@@ -91,6 +97,14 @@ void restoreLitersFromSD() {
 
   remainingLiters = tankCapacity - totalLitersConsumed;
   if (remainingLiters < 0) remainingLiters = 0;
+
+  // Allinea i riferimenti di persistenza automatica al valore appena
+  // ripristinato, che e' gia' quello contenuto in /last_liters.txt (o 0 se il
+  // file non esisteva e l'abbiamo appena creato). Senza questo, il primo giro di
+  // SensorLoop vedrebbe TRIGGER A/B veri (millis() - 0 >= 30000) e riscriverebbe
+  // un file identico: scrittura inutile e wear su SD.
+  lastLitersSavedValue = totalLitersConsumed;
+  lastLitersSaveMs     = millis();
 }
 
 
@@ -121,6 +135,14 @@ void handleSetTank() {
 
   // Salva su SD i litri consumati (totalLitersConsumed), non 0
   saveLastLitersToSD(totalLitersConsumed);
+
+  // Questa scrittura e' gia' avvenuta: riallinea i riferimenti di persistenza
+  // automatica, altrimenti il prossimo giro di SensorLoop riscriverebbe gli
+  // stessi litri. Vale sia per "serbatoio pieno" (consumo azzerato, 0.000
+  // gia' su disco) sia per "serbatoio vuoto" (consumo = capacita').
+
+  lastLitersSavedValue = totalLitersConsumed;
+  lastLitersSaveMs     = millis();
 
   server.send(200, "text/plain", "ok");
   Serial.printf("[WATER] Serbatoio: %.1f L / capacita %.1f L (consumati %.1f)\n",
